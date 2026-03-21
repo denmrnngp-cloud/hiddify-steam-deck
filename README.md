@@ -1,5 +1,12 @@
 # Hiddify VPN — Steam Deck Port
 
+> **Unofficial Steam Deck port of [hiddify/hiddify-app](https://github.com/hiddify/hiddify-app)**
+> Powered by [sing-box](https://github.com/SagerNet/sing-box) · Supports VLESS/Reality, VMess, Trojan, Hysteria 2, TUIC, Shadowsocks
+
+[![Based on](https://img.shields.io/badge/based%20on-hiddify%2Fhiddify--app-blue?logo=github)](https://github.com/hiddify/hiddify-app)
+[![Platform](https://img.shields.io/badge/platform-Steam%20Deck%20%2F%20SteamOS-informational?logo=steam)](https://store.steampowered.com/steamdeck)
+[![Decky Plugin](https://img.shields.io/badge/Decky-plugin-green?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyTDQgNXY2YzAgNS4yNSAzLjQgMTAuMTUgOCAxMS4zOEM' )](https://decky.xyz)
+
 Full port of [Hiddify](https://github.com/hiddify/hiddify-app) for Steam Deck / SteamOS.
 Works in Desktop Mode and Game Mode (via Decky plugin).
 
