@@ -208,10 +208,19 @@ to get the exact transient unit name, then stops it. Also sends `SIGTERM` to the
 
 ### Installer
 
+Three large upstream binaries are **not** included in this repo. Download them from the
+[Hiddify release](https://github.com/hiddify/hiddify-app/releases) and place into `release/installer-src/lib/`:
+
+| File | Size | Source |
+|------|------|--------|
+| `lib/hiddify-core.so` | ~70 MB | Hiddify release (sing-box core) |
+| `lib/libflutter_linux_gtk.so` | ~32 MB | Hiddify release (Flutter runtime) |
+| `lib/libapp.so` | ~15 MB | Hiddify release (Flutter app) |
+
+Then rebuild the self-extracting installer:
+
 ```bash
-# installer-src/ contains everything packed into the .bin
-# To rebuild:
-makeself --nox11 installer-src/ Hiddify-linux-x64.bin "Hiddify VPN" bash setup.sh
+makeself --nox11 release/installer-src/ Hiddify-linux-x64.bin "Hiddify VPN" bash setup.sh
 ```
 
 ### Decky Plugin
