@@ -6,6 +6,11 @@ extracted/
 hiddify-extracted/
 modified/
 
+# Large upstream binaries — download from Hiddify releases
+release/installer-src/lib/hiddify-core.so
+release/installer-src/lib/libflutter_linux_gtk.so
+release/installer-src/lib/libapp.so
+
 # Claude memory
 .claude/
 
