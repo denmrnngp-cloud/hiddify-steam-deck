@@ -1,0 +1,10 @@
+{
+  "name": "Hiddify VPN",
+  "author": "steam-decky",
+  "flags": [],
+  "api_version": 2,
+  "publish": {
+    "tags": ["vpn", "network", "hiddify"],
+    "description": "Control Hiddify VPN from Game Mode. Start/stop VPN with one button."
+  }
+}

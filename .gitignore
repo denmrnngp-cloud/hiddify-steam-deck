@@ -1,0 +1,25 @@
+# Build artifacts & binaries in root (old working files)
+*.AppImage
+*.pkg.tar.zst
+*.squashfs
+extracted/
+hiddify-extracted/
+modified/
+
+# Claude memory
+.claude/
+
+# Node
+decky-hiddify/node_modules/
+decky-hiddify/dist/
+decky-hiddify/decky-hiddify.zip
+decky-hiddify/bin/
+
+# Python
+**/__pycache__/
+
+# Old release zip
+release/decky-hiddify-v1.0.0.zip
+
+# macOS
+.DS_Store
