@@ -1,0 +1,32 @@
+[Unit]
+Description=Hiddify VPN Core Service
+Documentation=https://github.com/hiddify/hiddify-app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# WorkingDirectory = место где лежит hiddify-core.so
+# hiddify-core загружает ./lib/hiddify-core.so относительно cwd
+WorkingDirectory=/opt/hiddify
+
+ExecStart=/opt/hiddify/HiddifyCli service --grpc-addr 127.0.0.1:17079
+
+Restart=on-failure
+RestartSec=5
+
+# Capabilities для TUN — не нужен setcap, не нужен sudo
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+
+# Изоляция — сервис не может трогать ничего лишнего
+ProtectSystem=strict
+ReadWritePaths=/var/lib/hiddify /run/hiddify /home
+PrivateTmp=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hiddify
+
+[Install]
+WantedBy=multi-user.target
