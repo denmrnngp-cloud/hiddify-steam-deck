@@ -14,7 +14,11 @@ Works in Desktop Mode and Game Mode (via Decky plugin).
 
 ## Demo
 
-https://github.com/denmrnngp-cloud/hiddify-steam-deck/releases/download/v1.2.0/demo.mp4
+<a href="https://github.com/denmrnngp-cloud/hiddify-steam-deck/releases/download/v1.2.0/demo.mp4">
+  <img src="https://raw.githubusercontent.com/denmrnngp-cloud/hiddify-steam-deck/main/assets/demo.gif" alt="Demo — Hiddify VPN installer and VPN toggle in Desktop and Game Mode" width="100%"/>
+</a>
+
+▶ [Download / watch full demo (mp4)](https://github.com/denmrnngp-cloud/hiddify-steam-deck/releases/download/v1.2.0/demo.mp4)
 
 ---
 
