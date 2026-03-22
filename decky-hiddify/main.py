@@ -3,8 +3,9 @@ import asyncio
 import subprocess
 import os
 import json
-import signal
 import stat
+import socket
+import struct
 import sqlite3
 
 INSTALL_DIR  = "/opt/hiddify"
@@ -15,10 +16,142 @@ CONFIG_PATH  = f"{APP_DIR}/data/current-config.json"
 PROFILES_DB  = f"{APP_DIR}/db.sqlite"
 CONFIGS_DIR  = f"{APP_DIR}/configs"
 
+GRPC_PORT = 17078  # GUI in-process gRPC port
+
 
 class Plugin:
-    _process      = None
     _monitor_task = None
+    _user_stopped  = False  # set True when user explicitly stops VPN via plugin
+
+    # ── Minimal HTTP/2 gRPC helpers ────────────────────────────────────────────
+
+    @staticmethod
+    def _h2_frame(type_, flags, stream_id, payload=b''):
+        return struct.pack('>I', len(payload))[1:] + bytes([type_, flags]) + struct.pack('>I', stream_id) + payload
+
+    @staticmethod
+    def _hpack_str(s):
+        b = s.encode() if isinstance(s, str) else s
+        return bytes([len(b)]) + b
+
+    @staticmethod
+    def _pb_string(field_num, value):
+        """Encode a protobuf string field (wire type 2). Supports length up to 16383."""
+        b = value.encode() if isinstance(value, str) else value
+        tag = (field_num << 3) | 2
+        n = len(b)
+        if n < 128:
+            length_bytes = bytes([n])
+        else:
+            length_bytes = bytes([(n & 0x7F) | 0x80, n >> 7])
+        return bytes([tag]) + length_bytes + b
+
+    def _grpc_call(self, method_path, request_body=b'', port=GRPC_PORT, timeout=5):
+        """
+        Send a single gRPC unary call using raw HTTP/2 sockets.
+        Returns the gRPC response body bytes, or None on failure.
+        """
+        h2 = self._h2_frame
+        hs = self._hpack_str
+        authority = f'127.0.0.1:{port}'
+
+        # HPACK encoded request headers
+        hpack = (
+            bytes([0x83])                          # :method: POST
+            + bytes([0x86])                        # :scheme: http
+            + bytes([0x44]) + hs(method_path)      # :path
+            + bytes([0x41]) + hs(authority)        # :authority
+            + bytes([0x40]) + hs('content-type') + hs('application/grpc')
+            + bytes([0x40]) + hs('te')             + hs('trailers')
+        )
+
+        # gRPC message framing: 1 byte compressed flag + 4 byte length + body
+        grpc_msg = b'\x00' + struct.pack('>I', len(request_body)) + request_body
+
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(timeout)
+            s.connect(('127.0.0.1', port))
+
+            # Send HTTP/2 connection preface + our SETTINGS
+            s.sendall(b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n' + h2(0x04, 0x00, 0))
+
+            # Read server SETTINGS and ACK it
+            raw = b''
+            try:
+                raw = s.recv(4096)
+            except socket.timeout:
+                pass
+            i = 0
+            while i + 9 <= len(raw):
+                frame_len = struct.unpack('>I', b'\x00' + raw[i:i+3])[0]
+                frame_type = raw[i+3]
+                frame_flags = raw[i+4]
+                if frame_type == 0x04 and not (frame_flags & 0x01):
+                    s.sendall(h2(0x04, 0x01, 0))  # SETTINGS_ACK
+                i += 9 + frame_len
+
+            # Send our request
+            s.sendall(h2(0x01, 0x04, 1, hpack) + h2(0x00, 0x01, 1, grpc_msg))
+
+            # Read response frames
+            resp_raw = b''
+            try:
+                while True:
+                    chunk = s.recv(4096)
+                    if not chunk:
+                        break
+                    resp_raw += chunk
+            except socket.timeout:
+                pass
+
+            s.close()
+
+            # Parse DATA frame from response
+            i = 0
+            while i + 9 <= len(resp_raw):
+                frame_len = struct.unpack('>I', b'\x00' + resp_raw[i:i+3])[0]
+                frame_type = resp_raw[i+3]
+                payload = resp_raw[i+9:i+9+frame_len]
+                if frame_type == 0x00 and len(payload) >= 5:  # DATA frame
+                    grpc_len = struct.unpack('>I', payload[1:5])[0]
+                    return payload[5:5+grpc_len]
+                i += 9 + frame_len
+
+            return b''
+
+        except Exception as e:
+            decky.logger.debug(f"_grpc_call({method_path}:{port}) error: {e}")
+            return None
+
+    def _is_grpc_up(self, port=GRPC_PORT) -> bool:
+        """Check if the GUI's gRPC server is reachable."""
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(1)
+            s.connect(('127.0.0.1', port))
+            s.close()
+            return True
+        except Exception:
+            return False
+
+    def _grpc_stop(self) -> bool:
+        """Call Core.Stop() on the running gRPC server. Returns True if sent."""
+        result = self._grpc_call('/hcore.Core/Stop', b'', GRPC_PORT)
+        if result is not None:
+            decky.logger.info(f"gRPC Stop sent, response: {result.hex() if result else 'empty'}")
+            return True
+        return False
+
+    def _grpc_start(self) -> bool:
+        """Call Core.Start() on the running gRPC server with current config."""
+        # Build StartRequest protobuf: config_path (field 1) + config_name (field 7)
+        request = self._pb_string(1, CONFIG_PATH) + self._pb_string(7, "current-config")
+        result = self._grpc_call('/hcore.Core/Start', request, GRPC_PORT)
+        if result is not None:
+            decky.logger.info(f"gRPC Start sent, response: {result.hex() if result else 'empty'}")
+            return True
+        return False
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -47,22 +180,9 @@ class Plugin:
         return ""
 
     def _process_running(self) -> bool:
-        if self._process and self._process.poll() is None:
-            return True
-        try:
-            r = subprocess.run(["pgrep", "-f", "HiddifyC[l]i"], capture_output=True, text=True)
-            if r.stdout.strip():
-                return True
-        except Exception:
-            pass
+        # HiddifyCli always runs as gRPC server (app-hiddify@UUID.service from GUI).
+        # VPN state is determined by tun0 only; process presence is irrelevant.
         return False
-
-    def _gui_running(self) -> bool:
-        try:
-            r = subprocess.run(["pgrep", "-f", "/opt/hiddify/hiddif[y]"], capture_output=True, text=True)
-            return bool(r.stdout.strip())
-        except Exception:
-            return False
 
     # ── TUN / caps ─────────────────────────────────────────────────────────────
 
@@ -215,7 +335,21 @@ class Plugin:
 
     # ── Plugin API: VPN ────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _systemctl_user(args: list) -> subprocess.CompletedProcess:
+        """Run systemctl --user with proper DBUS env (works from plugin subprocess)."""
+        env = os.environ.copy()
+        env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/run/user/1000/bus"
+        env["XDG_RUNTIME_DIR"] = "/run/user/1000"
+        return subprocess.run(
+            ["systemctl", "--user"] + args,
+            capture_output=True, text=True, env=env,
+        )
+
     async def start_vpn(self) -> dict:
+        decky.logger.info("start_vpn called")
+        self._user_stopped = False
+
         if self._is_tun_up():
             return {"success": True, "message": "Already running"}
 
@@ -230,80 +364,83 @@ class Plugin:
         if not self._check_caps():
             self._apply_caps()
 
-        try:
-            env = os.environ.copy()
-            env["HOME"] = "/home/deck"
-            env["USER"] = "deck"
-
-            log_path = os.path.join(decky.DECKY_PLUGIN_LOG_DIR, "hiddify.log")
-            cmd = [CLI_PATH, "run", "-c", CONFIG_PATH, "--tun"]
-            decky.logger.info(f"Starting: {' '.join(cmd)}")
-
-            with open(log_path, "a") as log_f:
-                self._process = subprocess.Popen(
-                    cmd,
-                    stdout=log_f, stderr=log_f,
-                    env=env,
-                    preexec_fn=os.setsid,
-                    cwd=APP_DIR,
-                )
-
-            for _ in range(15):
+        # Path A: gRPC is available (GUI or its service holds port 17078)
+        if self._is_grpc_up():
+            decky.logger.info("gRPC up — starting via Core.Start")
+            self._grpc_start()
+            for i in range(10):
                 await asyncio.sleep(1)
                 if self._is_tun_up():
-                    decky.logger.info("VPN up (tun0 appeared)")
+                    decky.logger.info(f"VPN up via gRPC after {i+1}s")
                     return {"success": True, "message": "VPN started"}
-                if self._process and self._process.poll() is not None:
-                    decky.logger.error("HiddifyCli exited early")
-                    break
+            # Retry: stop then start
+            decky.logger.info("tun0 not up after 10s — retrying via gRPC Stop+Start")
+            self._grpc_stop()
+            await asyncio.sleep(2)
+            self._grpc_start()
+            for i in range(8):
+                await asyncio.sleep(1)
+                if self._is_tun_up():
+                    decky.logger.info(f"VPN up via gRPC retry after {i+1}s")
+                    return {"success": True, "message": "VPN started"}
+            decky.logger.error("gRPC Start failed — tun0 not up after retry")
+            return {"success": False, "message": "VPN did not start. Try restarting the Hiddify app."}
 
-            return {"success": False, "message": "VPN did not start — check config in Hiddify GUI"}
+        # Path B: no gRPC → start via systemd user service
+        decky.logger.info("No gRPC — starting via systemctl --user start hiddify")
+        r = self._systemctl_user(["start", "hiddify"])
+        if r.returncode != 0:
+            decky.logger.error(f"systemctl start failed: {r.stderr.strip()}")
+            return {"success": False, "message": f"Failed to start: {r.stderr.strip()}"}
 
-        except Exception as e:
-            decky.logger.error(f"start_vpn error: {e}")
-            return {"success": False, "message": str(e)}
+        for i in range(15):
+            await asyncio.sleep(1)
+            if self._is_tun_up():
+                decky.logger.info(f"VPN up via systemctl after {i+1}s")
+                return {"success": True, "message": "VPN started"}
+            status = self._systemctl_user(["is-active", "hiddify"])
+            if status.stdout.strip() not in ("active", "activating"):
+                logs = self._systemctl_user(["status", "hiddify"]).stdout[-300:]
+                decky.logger.error(f"service stopped early: {logs}")
+                break
+
+        return {"success": False, "message": "VPN did not start — check Hiddify config"}
 
     async def stop_vpn(self) -> dict:
+        decky.logger.info("stop_vpn called")
+        self._user_stopped = True
         try:
-            # Stop our subprocess
-            if self._process and self._process.poll() is None:
-                try:
-                    os.killpg(os.getpgid(self._process.pid), signal.SIGTERM)
-                    await asyncio.sleep(2)
-                    if self._process.poll() is None:
-                        os.killpg(os.getpgid(self._process.pid), signal.SIGKILL)
-                except Exception:
-                    pass
-            self._process = None
+            # If GUI is running — send gRPC Stop (GUI stays open, only VPN disconnects)
+            if self._is_grpc_up():
+                decky.logger.info("GUI gRPC detected — stopping via gRPC Core.Stop")
+                self._grpc_stop()
+                await asyncio.sleep(3)
+                if not self._is_tun_up():
+                    decky.logger.info("VPN stopped via gRPC")
+                    return {"success": True, "message": "VPN stopped"}
+                decky.logger.warning("gRPC Stop sent but tun0 still up — falling back to systemctl")
 
-            # Stop GUI-managed VPN (Flutter app embeds hiddify-core.so)
-            if self._gui_running() or self._is_tun_up():
-                # systemctl --user needs DBUS + XDG_RUNTIME_DIR
-                dbus_env = os.environ.copy()
-                dbus_env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/run/user/1000/bus"
-                dbus_env["XDG_RUNTIME_DIR"] = "/run/user/1000"
-                # Get exact unit names (glob doesn't work with systemctl stop)
-                r = subprocess.run(
-                    ["systemctl", "--user", "list-units", "app-hiddify@*.service",
-                     "--no-legend", "--plain", "--no-pager"],
-                    capture_output=True, text=True, env=dbus_env,
-                )
-                decky.logger.info(f"list-units output: {repr(r.stdout)}")
-                for line in r.stdout.splitlines():
-                    unit = line.split()[0] if line.split() else ""
-                    if unit.startswith("app-hiddify@"):
-                        subprocess.run(["systemctl", "--user", "stop", unit],
-                                       capture_output=True, env=dbus_env)
-                        decky.logger.info(f"Stopped unit: {unit}")
-                # Kill GUI process by specific path (won't match plugin itself)
-                subprocess.run(["pkill", "-TERM", "-f", "/opt/hiddify/hiddif[y]"], capture_output=True)
+            # Stop systemd user service (covers VPN started by plugin or systemd)
+            self._systemctl_user(["stop", "hiddify"])
+            await asyncio.sleep(2)
+
+            if not self._is_tun_up():
+                decky.logger.info("VPN stopped via systemctl")
+                return {"success": True, "message": "VPN stopped"}
+
+            # Last resort: kill any remaining HiddifyCli processes
+            subprocess.run(["pkill", "-TERM", "-f", "HiddifyC[l]i"], capture_output=True)
+            await asyncio.sleep(1)
+            subprocess.run(["pkill", "-KILL", "-f", "HiddifyC[l]i"], capture_output=True)
+
+            # Free gRPC port if still held by a stale process
+            subprocess.run(["sudo", "fuser", "-k", "17078/tcp"], capture_output=True)
+
+            # Force-remove tun0 if still present
+            if self._is_tun_up():
                 await asyncio.sleep(2)
-
-            # Kill any remaining HiddifyCli
-            for sig in ["-TERM", "-KILL"]:
-                subprocess.run(["pkill", sig, "-f", "HiddifyC[l]i"], capture_output=True)
-                if sig == "-TERM":
-                    await asyncio.sleep(1)
+            if self._is_tun_up():
+                subprocess.run(["sudo", "ip", "link", "delete", "tun0"], capture_output=True)
 
             decky.logger.info(f"stop_vpn done, tun_up={self._is_tun_up()}")
             return {"success": True, "message": "VPN stopped"}
@@ -332,14 +469,29 @@ class Plugin:
                 running = self._process_running()
 
                 if tun_up != prev_connected:
-                    decky.logger.info(f"VPN status changed: connected={tun_up}")
+                    decky.logger.info(f"VPN status changed: connected={tun_up} user_stopped={self._user_stopped}")
                     active = self._get_active_profile()
+
+                    # VPN dropped unexpectedly — auto-reconnect if gRPC is still up
+                    if prev_connected and not tun_up and not self._user_stopped:
+                        decky.logger.info("VPN dropped (not by user) — checking if gRPC is up for auto-reconnect")
+                        if self._is_grpc_up():
+                            decky.logger.info("gRPC up — auto-reconnecting via Core.Start")
+                            self._grpc_start()
+                            await asyncio.sleep(3)
+                            if self._is_tun_up():
+                                decky.logger.info("Auto-reconnect succeeded")
+                                prev_connected = True
+                                await asyncio.sleep(5)
+                                continue
+
                     await decky.emit("vpn_status_changed", {
                         "connected":      tun_up,
                         "running":        running,
                         "service_active": tun_up or running,
                         "vpn_ip":         self._get_vpn_ip() if tun_up else "",
                         "active_profile": active["name"] if active else "",
+                        "dropped":        bool(prev_connected and not tun_up and not self._user_stopped),
                     })
                     prev_connected = tun_up
 

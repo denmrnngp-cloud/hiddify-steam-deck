@@ -250,12 +250,8 @@ class HiddifyWizard(Gtk.Window):
 
         self._build_ui()
 
-    # ── Debug resize logger ────────────────────────────────────────────────────
-
     def _on_resize(self, widget, event):
-        w, h = widget.get_size()
-        with open("/tmp/hiddify_winsz.log", "a") as f:
-            f.write(f"HiddifyWizard: {w}x{h}\n")
+        pass
 
     # ── UI skeleton ────────────────────────────────────────────────────────────
 
@@ -693,9 +689,11 @@ class HiddifyWizard(Gtk.Window):
                 self._bar.set_text(f"{int(min(frac, 1.0)*100)}%")
             ) and False)
 
+        _SKIP_PREFIXES = ("job-working-directory:", "shell-init:", "bash: cannot set")
+
         def log(line):
             clean = ANSI_RE.sub("", line).rstrip()
-            if clean:
+            if clean and not any(clean.lstrip().startswith(p) for p in _SKIP_PREFIXES):
                 GLib.idle_add(self._append_log, clean)
 
         def step(text):
@@ -708,6 +706,7 @@ class HiddifyWizard(Gtk.Window):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True, bufsize=1,
+                cwd="/tmp",
                 env={**os.environ, "HIDDIFY_WIZARD": "1"},
             )
             proc.stdin.write(self.sudo_password + "\n")
@@ -806,9 +805,7 @@ class AlreadyInstalledWindow(Gtk.Window):
         if os.path.exists(ICON_PATH):
             self.set_icon_from_file(ICON_PATH)
         self.connect("delete-event", lambda *_: Gtk.main_quit())
-        self.connect("configure-event", lambda w, e: open("/tmp/hiddify_winsz.log", "a").write(
-            f"AlreadyInstalledWindow: {w.get_size()[0]}x{w.get_size()[1]}\n"
-        ))
+        self.connect("configure-event", lambda w, e: None)
 
         self._action  = "reinstall"
         self._sudo_pw = ""

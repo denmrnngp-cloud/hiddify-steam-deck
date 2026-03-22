@@ -83,9 +83,12 @@ function VpnPanel() {
     fetchStatus();
     fetchProfiles();
 
-    const listener = addEventListener<[VpnStatus]>("vpn_status_changed", (s) =>
-      setStatus(prev => ({ ...prev, ...s }))
-    );
+    const listener = addEventListener<[VpnStatus & { dropped?: boolean }]>("vpn_status_changed", (s) => {
+      if ((s as any).dropped) {
+        toaster.toast({ title: "Hiddify VPN", body: "VPN disconnected — tap to reconnect", duration: 5000 });
+      }
+      setStatus(prev => ({ ...prev, ...s }));
+    });
     const iv = setInterval(fetchStatus, 5000);
     return () => { removeEventListener("vpn_status_changed", listener); clearInterval(iv); };
   }, []);
@@ -93,7 +96,7 @@ function VpnPanel() {
   const handleToggle = async () => {
     if (loading) return;
     setLoading(true);
-    const wasOn = status.connected || status.running;
+    const wasOn = status.connected;
     try {
       const result = wasOn ? await stopVpn() : await startVpn();
       if (!result.success) {
@@ -138,7 +141,7 @@ function VpnPanel() {
     }
   };
 
-  const isOn = status.connected || status.running;
+  const isOn = status.connected;
 
   // Status dot color
   const dotColor = status.connected ? "#4ade80" : status.running ? "#facc15" : "#f87171";

@@ -1,10 +1,12 @@
 {
   "name": "Hiddify VPN",
-  "author": "steam-decky",
+  "author": "denmrnngp-cloud",
   "flags": [],
   "api_version": 2,
+  "version": "1.2.0",
   "publish": {
-    "tags": ["vpn", "network", "hiddify"],
-    "description": "Control Hiddify VPN from Game Mode. Start/stop VPN with one button."
+    "tags": ["vpn", "network", "hiddify", "proxy", "sing-box"],
+    "description": "Control Hiddify VPN from Game Mode. Toggle VPN on/off, switch profiles, view connection status. Requires Hiddify installed via the installer — see github.com/denmrnngp-cloud/hiddify-steam-deck",
+    "image": "https://raw.githubusercontent.com/denmrnngp-cloud/decky-hiddify/main/assets/store.png"
   }
 }
