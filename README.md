@@ -14,7 +14,7 @@ Works in Desktop Mode and Game Mode (via Decky plugin).
 
 ## Demo
 
-https://github.com/denmrnngp-cloud/hiddify-steam-deck/raw/main/assets/demo.mp4
+<video src="https://github.com/denmrnngp-cloud/hiddify-steam-deck/raw/main/assets/demo.mp4" controls width="100%"></video>
 
 ---
 
