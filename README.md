@@ -1,5 +1,7 @@
 # Hiddify VPN — Steam Deck Port
 
+<img src="assets/cover.png" alt="Hiddify VPN for Steam Deck" width="100%"/>
+
 > **Unofficial Steam Deck port of [hiddify/hiddify-app](https://github.com/hiddify/hiddify-app)**
 > Powered by [sing-box](https://github.com/SagerNet/sing-box) · Supports VLESS/Reality, VMess, Trojan, Hysteria 2, TUIC, Shadowsocks
 
@@ -10,6 +12,10 @@
 Full port of [Hiddify](https://github.com/hiddify/hiddify-app) for Steam Deck / SteamOS.
 Works in Desktop Mode and Game Mode (via Decky plugin).
 
+## Demo
+
+https://github.com/denmrnngp-cloud/hiddify-steam-deck/raw/main/assets/demo.mp4
+
 ---
 
 ## Release Contents
@@ -17,7 +23,7 @@ Works in Desktop Mode and Game Mode (via Decky plugin).
 | File | Description |
 |------|-------------|
 | `Hiddify-linux-x64.bin` | Self-extracting installer (~51 MB) |
-| `decky-hiddify-v1.1.0.zip` | Decky plugin for Game Mode VPN control |
+| `decky-hiddify-v1.2.0.zip` | Decky plugin for Game Mode VPN control |
 | `installer-src/` | Installer source (install.sh + all bundled files) |
 
 ---
@@ -74,8 +80,8 @@ Config is saved to:
 For VPN control from Game Mode (the `···` button):
 
 ```bash
-# Copy decky-hiddify-v1.1.0.zip to Steam Deck, then:
-sudo unzip -o decky-hiddify-v1.1.0.zip -d /home/deck/homebrew/plugins/
+# Copy decky-hiddify-v1.2.0.zip to Steam Deck, then:
+sudo unzip -o decky-hiddify-v1.2.0.zip -d /home/deck/homebrew/plugins/
 sudo systemctl restart plugin_loader
 ```
 
@@ -179,7 +185,7 @@ cd ~/.local/share/app.hiddify.com
 
 ---
 
-## Decky Plugin (v1.1.0)
+## Decky Plugin (v1.2.0)
 
 The `decky-hiddify` plugin adds VPN control to Quick Access Menu (the `···` button).
 
