@@ -45,10 +45,10 @@ ha_state() {
     if [ "$status" = "connected" ]; then
         # preserve existing started_at if already connected, else set now
         local prev_started
-        prev_started=$(python3 -c "
-import json,sys
+        prev_started=$(_STATE_FILE="$STATE_FILE" python3 -c "
+import json,os
 try:
-    d=json.load(open('$STATE_FILE'))
+    d=json.load(open(os.environ['_STATE_FILE']))
     print(d.get('started_at','') if d.get('status')=='connected' else '')
 except: print('')
 " 2>/dev/null || true)
@@ -80,16 +80,20 @@ except: print('')
     fi
 
     # Save local state (read by web_ui.py)
+    # Pass dynamic values as env vars to avoid shell-quoting issues
+    _STATUS="$status" _IP="$ip" _PROFILE="$profile" \
+    _STARTED="$started_at" _UPDATED="$(date -Iseconds)" \
+    _STATE_FILE="$STATE_FILE" \
     python3 -c "
-import json, sys
+import json, os
 d = {
-    'status':     '$status',
-    'ip':         '$ip',
-    'profile':    '$profile',
-    'started_at': '$started_at',
-    'updated':    '$(date -Iseconds)',
+    'status':     os.environ['_STATUS'],
+    'ip':         os.environ['_IP'],
+    'profile':    os.environ['_PROFILE'],
+    'started_at': os.environ['_STARTED'],
+    'updated':    os.environ['_UPDATED'],
 }
-with open('$STATE_FILE', 'w') as f:
+with open(os.environ['_STATE_FILE'], 'w') as f:
     json.dump(d, f)
 " 2>/dev/null || true
 }
@@ -109,7 +113,7 @@ setup_tun() {
 # ── Parse subscription ─────────────────────────────────────────────────────────
 
 parse_config() {
-    echo "[hiddify] Parsing subscription..."
+    echo "[hiddify] Parsing subscription..." >&2
     ha_state "connecting" "" "Fetching config..."
 
     TUN_FLAG="--tun"
@@ -132,12 +136,13 @@ print(json.dumps(out))
         --log "$LOG_LEVEL" \
         --proxy-domains "$PROXY_DOMAINS" \
         --out "$HIDDIFY_CONFIG" 2>&1 | tail -1) || {
-        echo "[hiddify] ERROR: Failed to parse subscription"
+        echo "[hiddify] ERROR: Failed to parse subscription" >&2
         ha_state "error" "" "Failed to parse subscription"
         return 1
     }
 
-    echo "[hiddify] Profile: $PROFILE_NAME"
+    echo "[hiddify] Profile: $PROFILE_NAME" >&2
+    # Only output the profile name to stdout (captured by callers via $())
     echo "$PROFILE_NAME"
 }
 

@@ -201,7 +201,12 @@ HTML = r"""<!DOCTYPE html>
   <!-- header -->
   <div class="header">
     <div class="logo">
-      <img src="icon.png" width="42" height="42" alt="Hiddify" style="border-radius:10px"/>
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width:42px;height:42px;fill:#4caf50">
+        <path d="M2,21V15H4.5V17.5H5.5V12H8V21H5.5V19H4.5V21Z
+                 M10,21V9H13V21Z
+                 M15,21V9H17.5V21Z
+                 M16,4H20V7.5H16Z"/>
+      </svg>
     </div>
     <div class="title-block">
       <h1>Hiddify VPN</h1>
@@ -259,7 +264,7 @@ HTML = r"""<!DOCTYPE html>
     <div class="msg" id="msg"></div>
   </div>
 
-  <div class="footer">Updates every 2 s · Hiddify VPN 1.8.0</div>
+  <div class="footer">Updates every 2 s · Hiddify VPN 1.9.0</div>
 </div>
 
 <script>
