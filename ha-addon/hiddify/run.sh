@@ -5,6 +5,7 @@ CONFIG_JSON="/data/options.json"
 HIDDIFY_CONFIG="/data/hiddify/config.json"
 HIDDIFY_BIN="/usr/local/bin/sing-box"
 STATE_FILE="/data/hiddify/state.json"
+PROFILES_FILE="/data/hiddify/profiles.json"
 LOG_FILE="/data/hiddify/hiddify.log"
 HA_URL="http://supervisor/core/api"
 HA_TOKEN="${SUPERVISOR_TOKEN:-}"
@@ -113,6 +114,16 @@ parse_config() {
 
     TUN_FLAG="--tun"
     [ "$TUN_MODE" = "false" ] && TUN_FLAG="--no-tun"
+
+    # Save full profile list for web UI (--list mode)
+    python3 /parse_sub.py --url "$SUB_URL" --list \
+        --out "$HIDDIFY_CONFIG" 2>/dev/null \
+        | python3 -c "
+import json,sys
+names=json.load(sys.stdin)
+out=[{'index':i,'name':n} for i,n in enumerate(names)]
+print(json.dumps(out))
+" > "$PROFILES_FILE" 2>/dev/null || echo "[]" > "$PROFILES_FILE"
 
     PROFILE_NAME=$(python3 /parse_sub.py \
         --url "$SUB_URL" \
