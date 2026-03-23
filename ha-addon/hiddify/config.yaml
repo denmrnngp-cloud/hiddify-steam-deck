@@ -1,6 +1,6 @@
 name: "Hiddify VPN"
 description: "VPN client powered by sing-box. Masks all traffic via VLESS, VMess, Trojan, Hysteria2, TUIC, Reality. Add your subscription URL or proxy link."
-version: "1.7.0"
+version: "1.8.0"
 slug: "hiddify"
 init: false
 homeassistant_api: true
@@ -55,5 +55,5 @@ ingress: true
 ingress_port: 8080
 ingress_panel: true
 
-panel_icon: mdi:vpn
+panel_icon: hiddify:logo
 panel_title: Hiddify VPN

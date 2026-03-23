@@ -244,6 +244,35 @@ else
     ha_state "connected" "" "$PROFILE_NAME"
 fi
 
+# ── Register custom icon in HA Lovelace ───────────────────────────────────────
+
+mkdir -p /config/www
+cp /hiddify-icons.js /config/www/hiddify-icons.js
+
+# Add /local/hiddify-icons.js to lovelace_resources storage if not already there
+python3 << 'PYEOF'
+import json, os, time
+
+storage = "/config/.storage/lovelace_resources"
+url     = "/local/hiddify-icons.js"
+
+try:
+    with open(storage) as f:
+        data = json.load(f)
+except Exception:
+    data = {"version": 1, "minor_version": 1,
+            "key": "lovelace_resources", "data": {"items": []}}
+
+items = data.setdefault("data", {}).setdefault("items", [])
+if not any(i.get("url") == url for i in items):
+    items.append({"id": str(int(time.time()*1000)), "res_type": "module", "url": url})
+    with open(storage, "w") as f:
+        json.dump(data, f, indent=2)
+    print(f"[hiddify] Lovelace resource registered: {url}")
+else:
+    print(f"[hiddify] Lovelace resource already present: {url}")
+PYEOF
+
 # ── Start web dashboard ────────────────────────────────────────────────────────
 
 echo "[hiddify] Starting web dashboard on :8080"

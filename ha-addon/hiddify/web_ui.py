@@ -18,6 +18,7 @@ STATE_FILE    = "/data/hiddify/state.json"
 PROFILES_FILE = "/data/hiddify/profiles.json"
 TUN_STATS     = "/sys/class/net/tun0/statistics"
 OPTIONS_FILE  = "/data/options.json"
+ICON_FILE     = "/icon.png"
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -200,10 +201,7 @@ HTML = r"""<!DOCTYPE html>
   <!-- header -->
   <div class="header">
     <div class="logo">
-      <svg viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="22" cy="22" r="21" fill="#1c1f26" stroke="#2196f3" stroke-width="2"/>
-        <path d="M22 10c-6.627 0-12 5.373-12 12s5.373 12 12 12 12-5.373 12-12S28.627 10 22 10zm0 4a8 8 0 0 1 7.924 6.857A5 5 0 0 0 22 17a5 5 0 0 0-4.995 4.562A8.001 8.001 0 0 1 22 14zm0 16a8 8 0 0 1-7.938-7H18a4 4 0 0 0 8 0h3.938A8 8 0 0 1 22 30z" fill="#2196f3"/>
-      </svg>
+      <img src="icon.png" width="42" height="42" alt="Hiddify" style="border-radius:10px"/>
     </div>
     <div class="title-block">
       <h1>Hiddify VPN</h1>
@@ -261,7 +259,7 @@ HTML = r"""<!DOCTYPE html>
     <div class="msg" id="msg"></div>
   </div>
 
-  <div class="footer">Updates every 2 s · Hiddify VPN 1.7.0</div>
+  <div class="footer">Updates every 2 s · Hiddify VPN 1.8.0</div>
 </div>
 
 <script>
@@ -412,6 +410,20 @@ class Handler(BaseHTTPRequestHandler):
 
         elif path.endswith("/stats") or path == "/stats":
             self._json(200, _stats())
+
+        elif path.endswith("/icon.png"):
+            try:
+                with open(ICON_FILE, "rb") as f:
+                    body = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", len(body))
+                self.send_header("Cache-Control", "max-age=86400")
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception:
+                self.send_response(404)
+                self.end_headers()
 
         else:
             self.send_response(404)
