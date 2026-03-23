@@ -28,7 +28,6 @@ echo "[hiddify] TUN mode: $TUN_MODE"
 
 if [ -z "$SUB_URL" ]; then
     echo "[hiddify] ERROR: subscription_url is empty. Set it in add-on configuration."
-    ha_state "error" "" "No subscription URL configured"
     sleep 30
     exit 1
 fi
@@ -39,6 +38,25 @@ ha_state() {
     local status="$1"
     local ip="$2"
     local profile="$3"
+
+    # started_at: set on first connect, cleared on disconnect
+    local started_at=""
+    if [ "$status" = "connected" ]; then
+        # preserve existing started_at if already connected, else set now
+        local prev_started
+        prev_started=$(python3 -c "
+import json,sys
+try:
+    d=json.load(open('$STATE_FILE'))
+    print(d.get('started_at','') if d.get('status')=='connected' else '')
+except: print('')
+" 2>/dev/null || true)
+        if [ -n "$prev_started" ]; then
+            started_at="$prev_started"
+        else
+            started_at=$(date +%s)
+        fi
+    fi
 
     if [ -n "$HA_TOKEN" ]; then
         curl -s -X POST "$HA_URL/states/sensor.hiddify_status" \
@@ -60,9 +78,19 @@ ha_state() {
             >/dev/null 2>&1 || true
     fi
 
-    # Save local state
-    printf '{"status":"%s","ip":"%s","profile":"%s","updated":"%s"}\n' \
-        "$status" "$ip" "$profile" "$(date -Iseconds)" > "$STATE_FILE"
+    # Save local state (read by web_ui.py)
+    python3 -c "
+import json, sys
+d = {
+    'status':     '$status',
+    'ip':         '$ip',
+    'profile':    '$profile',
+    'started_at': '$started_at',
+    'updated':    '$(date -Iseconds)',
+}
+with open('$STATE_FILE', 'w') as f:
+    json.dump(d, f)
+" 2>/dev/null || true
 }
 
 # ── TUN setup ──────────────────────────────────────────────────────────────────
@@ -120,7 +148,7 @@ monitor_loop() {
     while true; do
         sleep 10
 
-        # Check if hiddify-core is still running
+        # Check if sing-box is still running
         if ! kill -0 "$HIDDIFY_PID" 2>/dev/null; then
             echo "[hiddify] Process died, restarting..."
             ha_state "disconnected" "" "$profile"
@@ -154,7 +182,7 @@ cleanup() {
     ha_state "disconnected" "" ""
     [ -n "${HIDDIFY_PID:-}" ] && kill "$HIDDIFY_PID" 2>/dev/null || true
     wait "${HIDDIFY_PID:-}" 2>/dev/null || true
-    # Remove TUN interface
+    [ -n "${WEB_PID:-}" ]  && kill "$WEB_PID"  2>/dev/null || true
     ip link delete tun0 2>/dev/null || true
     exit 0
 }
@@ -200,25 +228,27 @@ if [ "$TUN_MODE" = "true" ]; then
     else
         echo "[hiddify] Waiting for TUN interface..."
         ha_state "connecting" "" "$PROFILE_NAME"
-        # hiddify-core v4 may need explicit TUN start - try sing-box config directly
-        if [ -f /data/hiddify/work/data/current-config.json ]; then
-            echo "[hiddify] Trying converted config from hiddify-core..."
-            cat /data/hiddify/work/data/current-config.json | head -5
-        fi
     fi
 else
     ha_state "connected" "" "$PROFILE_NAME"
 fi
 
+# ── Start web dashboard ────────────────────────────────────────────────────────
+
+echo "[hiddify] Starting web dashboard on :8080"
+WEB_PORT=8080 python3 /web_ui.py 2>&1 | while IFS= read -r line; do echo "[web] $line"; done &
+WEB_PID=$!
+
 # Start monitor in background
 monitor_loop "$PROFILE_NAME" &
 MONITOR_PID=$!
 
-# Wait for hiddify-core to exit
+# Wait for sing-box to exit
 wait "$HIDDIFY_PID"
 EXIT_CODE=$?
 
 kill "$MONITOR_PID" 2>/dev/null || true
-echo "[hiddify] hiddify-core exited with code $EXIT_CODE"
+kill "$WEB_PID"     2>/dev/null || true
+echo "[hiddify] sing-box exited with code $EXIT_CODE"
 ha_state "disconnected" "" ""
 exit "$EXIT_CODE"

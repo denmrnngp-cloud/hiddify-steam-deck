@@ -39,6 +39,7 @@ RUN mkdir -p /data/hiddify /var/lib/hiddify
 COPY run.sh /run.sh
 COPY parse_sub.py /parse_sub.py
 COPY grpc_ctl.py /grpc_ctl.py
+COPY web_ui.py /web_ui.py
 
 RUN chmod +x /run.sh
 
