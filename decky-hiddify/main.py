@@ -206,6 +206,22 @@ class Plugin:
             os.mknod("/dev/net/tun", 0o666 | stat.S_IFCHR, os.makedev(10, 200))
             os.chmod("/dev/net/tun", 0o666)
 
+    def _disable_tun_ipv6(self):
+        """Disable IPv6 on tun0.
+
+        HiddifyCli's FakeDNS returns both A and AAAA (fc00::/18) records.
+        The Shadowsocks proxy typically can't forward IPv6, so curl/apps try
+        the IPv6 fake address first (Happy Eyeballs), wait for a full TCP
+        timeout (~20s), then fall back to IPv4. Disabling IPv6 on tun0 makes
+        the kernel reject IPv6 connections instantly (ENETUNREACH) → immediate
+        fallback to IPv4, no delay.
+        """
+        subprocess.run(
+            ["sysctl", "-w", "net.ipv6.conf.tun0.disable_ipv6=1"],
+            capture_output=True,
+        )
+        decky.logger.info("IPv6 disabled on tun0 (proxy does not forward IPv6)")
+
     # ── Install state ──────────────────────────────────────────────────────────
 
     def _get_install_state(self) -> tuple[str, str]:
@@ -378,6 +394,7 @@ class Plugin:
                 await asyncio.sleep(1)
                 if self._is_tun_up():
                     decky.logger.info(f"VPN up via gRPC after {i+1}s")
+                    self._disable_tun_ipv6()
                     return {"success": True, "message": "VPN started"}
             # Retry: stop then start
             decky.logger.info("tun0 not up after 10s — retrying via gRPC Stop+Start")
@@ -388,6 +405,7 @@ class Plugin:
                 await asyncio.sleep(1)
                 if self._is_tun_up():
                     decky.logger.info(f"VPN up via gRPC retry after {i+1}s")
+                    self._disable_tun_ipv6()
                     return {"success": True, "message": "VPN started"}
             decky.logger.error("gRPC Start failed — tun0 not up after retry")
             return {"success": False, "message": "VPN did not start. Try restarting the Hiddify app."}
@@ -403,6 +421,7 @@ class Plugin:
             await asyncio.sleep(1)
             if self._is_tun_up():
                 decky.logger.info(f"VPN up via systemctl after {i+1}s")
+                self._disable_tun_ipv6()
                 return {"success": True, "message": "VPN started"}
             status = self._systemctl_user(["is-active", "hiddify"])
             if status.stdout.strip() not in ("active", "activating"):
@@ -487,6 +506,7 @@ class Plugin:
                             await asyncio.sleep(3)
                             if self._is_tun_up():
                                 decky.logger.info("Auto-reconnect succeeded")
+                                self._disable_tun_ipv6()
                                 prev_connected = True
                                 await asyncio.sleep(5)
                                 continue

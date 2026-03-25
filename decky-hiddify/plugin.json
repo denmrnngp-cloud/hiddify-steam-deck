@@ -3,7 +3,7 @@
   "author": "denmrnngp-cloud",
   "flags": [],
   "api_version": 2,
-  "version": "1.2.0",
+  "version": "1.3.0",
   "publish": {
     "tags": ["vpn", "network", "hiddify", "proxy", "sing-box"],
     "description": "Control Hiddify VPN from Game Mode. Toggle VPN on/off, switch profiles, view connection status. Requires Hiddify installed via the installer — see github.com/denmrnngp-cloud/hiddify-steam-deck",
