@@ -8,6 +8,12 @@ import socket
 import struct
 import sqlite3
 
+# Decky PluginLoader is a PyInstaller bundle that sets LD_LIBRARY_PATH to its
+# own extracted libs dir (/tmp/_MEI.../). This leaks into every subprocess and
+# causes systemctl (and other system binaries) to load the wrong libcrypto.so.3,
+# producing: "version `OPENSSL_3.4.0' not found". Clear it at import time.
+os.environ.pop("LD_LIBRARY_PATH", None)
+
 INSTALL_DIR  = "/opt/hiddify"
 CLI_PATH     = f"{INSTALL_DIR}/HiddifyCli"
 GUI_PATH     = f"{INSTALL_DIR}/hiddify"
