@@ -25,9 +25,10 @@ echo "  ╚═╝  ╚═╝╚═╝╚═════╝ ╚═════╝
 echo ""
 
 # Root check: when called from GUI wizard it is already running via sudo -S
-# When launched directly from terminal — check here
+# When launched directly (double-click / xterm) — re-exec with sudo automatically
 if [ "$EUID" -ne 0 ] && [ -z "$HIDDIFY_WIZARD" ]; then
-    err "Run with root privileges: sudo bash install.sh"
+    echo "Requesting root privileges..."
+    exec sudo bash "$0" "$@"
 fi
 
 # ── Platform detection ──────────────────────────────────────────────────────────

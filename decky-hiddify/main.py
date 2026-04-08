@@ -565,6 +565,7 @@ polkit.addRule(function(action, subject) {
         "org.freedesktop.resolve1.set-dnssec",
         "org.freedesktop.resolve1.set-nta",
         "org.freedesktop.NetworkManager.network-control",
+        "org.freedesktop.NetworkManager.settings.modify.system",
         "org.freedesktop.NetworkManager.wifi.share.open",
         "net.hiddify.app",
         "com.hiddify.app",
