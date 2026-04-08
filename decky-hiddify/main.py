@@ -236,12 +236,19 @@ class Plugin:
     def _read_profiles(self) -> list:
         try:
             db = sqlite3.connect(PROFILES_DB)
-            db.row_factory = sqlite3.Row
-            rows = db.execute(
-                "SELECT id, name, active FROM profile_entries ORDER BY name"
-            ).fetchall()
+            cols = {row[1] for row in db.execute("PRAGMA table_info(profile_entries)")}
+            if "active" in cols:
+                rows = db.execute(
+                    "SELECT id, name, active FROM profile_entries ORDER BY name"
+                ).fetchall()
+                result = [{"id": r[0], "name": r[1], "active": bool(r[2])} for r in rows]
+            else:
+                rows = db.execute(
+                    "SELECT id, name FROM profile_entries ORDER BY name"
+                ).fetchall()
+                result = [{"id": r[0], "name": r[1], "active": False} for r in rows]
             db.close()
-            return [{"id": r["id"], "name": r["name"], "active": bool(r["active"])} for r in rows]
+            return result
         except Exception as e:
             decky.logger.error(f"_read_profiles: {e}")
             return []
@@ -543,10 +550,12 @@ class Plugin:
         except Exception as e:
             decky.logger.warning(f"Could not write sudoers: {e}")
 
-        try:
-            polkit_dir = "/usr/share/polkit-1/rules.d"
-            os.makedirs(polkit_dir, exist_ok=True)
-            polkit_rule = """\
+        # /usr/share/polkit-1/rules.d is read-only on SteamOS (squashfs).
+        # /etc/polkit-1/rules.d is on the writable partition and takes precedence.
+        for polkit_dir in ("/etc/polkit-1/rules.d", "/usr/share/polkit-1/rules.d"):
+            try:
+                os.makedirs(polkit_dir, exist_ok=True)
+                polkit_rule = """\
 polkit.addRule(function(action, subject) {
     var allowed = [
         "org.freedesktop.resolve1.set-domains",
@@ -555,16 +564,25 @@ polkit.addRule(function(action, subject) {
         "org.freedesktop.resolve1.set-dns-over-tls",
         "org.freedesktop.resolve1.set-dnssec",
         "org.freedesktop.resolve1.set-nta",
+        "org.freedesktop.NetworkManager.network-control",
+        "org.freedesktop.NetworkManager.wifi.share.open",
+        "net.hiddify.app",
+        "com.hiddify.app",
     ];
     if (subject.user === "deck" && allowed.indexOf(action.id) !== -1) {
         return polkit.Result.YES;
     }
+    if (subject.user === "deck" && action.id.indexOf("hiddify") !== -1) {
+        return polkit.Result.YES;
+    }
 });
 """
-            with open(f"{polkit_dir}/10-hiddify.rules", "w") as f:
-                f.write(polkit_rule)
-        except Exception as e:
-            decky.logger.warning(f"Could not write polkit rule: {e}")
+                with open(f"{polkit_dir}/10-hiddify.rules", "w") as f:
+                    f.write(polkit_rule)
+                decky.logger.info(f"polkit rule written to {polkit_dir}")
+                break  # success — no need to try fallback
+            except Exception as e:
+                decky.logger.warning(f"Could not write polkit rule to {polkit_dir}: {e}")
 
         if os.path.exists(CLI_PATH) and not self._check_caps():
             self._apply_caps()

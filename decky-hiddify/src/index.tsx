@@ -167,6 +167,11 @@ function VpnPanel() {
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 14, fontWeight: "bold", color: dotColor }}>
                   {isOn ? "VPN ON" : "VPN OFF"}
+                  {status.active_profile ? (
+                    <span style={{ fontSize: 11, fontWeight: "normal", opacity: 0.75, marginLeft: 6 }}>
+                      {status.active_profile}
+                    </span>
+                  ) : null}
                 </div>
                 <div style={{ fontSize: 11, opacity: 0.7 }}>{statusText}</div>
               </div>
@@ -177,7 +182,7 @@ function VpnPanel() {
         </PanelSectionRow>
 
         {/* Profile selector */}
-        {profiles.length > 1 && (
+        {profiles.length > 0 && (
           <PanelSectionRow>
             <div style={{ width: "100%", paddingTop: 4 }}>
               <div style={{ fontSize: 11, opacity: 0.5, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>

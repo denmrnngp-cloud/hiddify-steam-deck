@@ -103,6 +103,7 @@ if [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/HiddifyCli" ]; then
 
             # ── 3. Remove sudoers and polkit rules ──────────────────────────────
             rm -f /etc/sudoers.d/hiddify /etc/sudoers.d/zz-deck-nopasswd
+            rm -f /etc/polkit-1/rules.d/10-hiddify.rules
             rm -f /usr/share/polkit-1/rules.d/10-hiddify.rules
 
             # ── 4. Remove application files ─────────────────────────────────────
@@ -215,11 +216,12 @@ echo "deck ALL=(ALL) NOPASSWD: $INSTALL_DIR/HiddifyCli *" > "$SUDOERS_FILE"
 chmod 0440 "$SUDOERS_FILE"
 ok "Passwordless sudo configured for HiddifyCli"
 
-# Polkit rule — allow deck user to configure DNS/routes via systemd-resolved without password
-# These are the 3 dialogs Hiddify shows on every VPN connect:
-#   "Authentication is required to set domains/default route/DNS servers"
-mkdir -p /usr/share/polkit-1/rules.d
-cat > /usr/share/polkit-1/rules.d/10-hiddify.rules << 'POLKIT'
+# Polkit rule — allow deck user to configure DNS/routes without password prompts.
+# Written to /etc/polkit-1/rules.d/ which is on the writable partition and
+# survives SteamOS A/B updates (unlike /usr/share which is squashfs).
+# The plugin also re-applies this rule on every load as a belt-and-suspenders.
+mkdir -p /etc/polkit-1/rules.d
+cat > /etc/polkit-1/rules.d/10-hiddify.rules << 'POLKIT'
 polkit.addRule(function(action, subject) {
     var allowed = [
         "org.freedesktop.resolve1.set-domains",
@@ -228,13 +230,20 @@ polkit.addRule(function(action, subject) {
         "org.freedesktop.resolve1.set-dns-over-tls",
         "org.freedesktop.resolve1.set-dnssec",
         "org.freedesktop.resolve1.set-nta",
+        "org.freedesktop.NetworkManager.settings.modify.system",
+        "org.freedesktop.NetworkManager.wifi.share.open",
+        "net.hiddify.app",
+        "com.hiddify.app",
     ];
     if (subject.user === "deck" && allowed.indexOf(action.id) !== -1) {
         return polkit.Result.YES;
     }
+    if (subject.user === "deck" && action.id.indexOf("hiddify") !== -1) {
+        return polkit.Result.YES;
+    }
 });
 POLKIT
-ok "Polkit rule configured (no password for DNS/route changes)"
+ok "Polkit rule configured (no password for DNS/route/NM changes)"
 
 # GUI wrapper script (used by the desktop shortcut)
 cat > "$INSTALL_DIR/hiddify-gui" << 'WRAPPER'
