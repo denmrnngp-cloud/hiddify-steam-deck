@@ -7,6 +7,7 @@ import stat
 import socket
 import struct
 import sqlite3
+import datetime
 
 # Decky PluginLoader is a PyInstaller bundle that sets LD_LIBRARY_PATH to its
 # own extracted libs dir (/tmp/_MEI.../). This leaks into every subprocess and
@@ -21,8 +22,18 @@ APP_DIR      = "/home/deck/.local/share/app.hiddify.com"
 CONFIG_PATH  = f"{APP_DIR}/data/current-config.json"
 PROFILES_DB  = f"{APP_DIR}/db.sqlite"
 CONFIGS_DIR  = f"{APP_DIR}/configs"
+APP_LOG_PATH = f"{APP_DIR}/app.log"
+DEBUG_LOG_PATH = f"{APP_DIR}/decky-debug.log"
 
 GRPC_PORT = 17078  # GUI in-process gRPC port
+SYSTEMD_START_TIMEOUT = 30
+
+PLUGIN_VERSION = "unknown"
+try:
+    with open(os.path.join(os.path.dirname(__file__), "plugin.json")) as f:
+        PLUGIN_VERSION = str(json.load(f).get("version", "unknown"))
+except Exception:
+    pass
 
 
 class Plugin:
@@ -189,6 +200,61 @@ class Plugin:
         # HiddifyCli always runs as gRPC server (app-hiddify@UUID.service from GUI).
         # VPN state is determined by tun0 only; process presence is irrelevant.
         return False
+
+    @staticmethod
+    def _tail_file(path: str, max_lines: int = 40) -> str:
+        try:
+            with open(path) as f:
+                return "".join(f.readlines()[-max_lines:]).strip()
+        except Exception:
+            return ""
+
+    def _debug_event(self, event: str, **fields):
+        try:
+            os.makedirs(APP_DIR, exist_ok=True)
+            if os.path.exists(DEBUG_LOG_PATH) and os.path.getsize(DEBUG_LOG_PATH) > 512 * 1024:
+                rotated = f"{DEBUG_LOG_PATH}.1"
+                try:
+                    os.remove(rotated)
+                except FileNotFoundError:
+                    pass
+                os.rename(DEBUG_LOG_PATH, rotated)
+
+            payload = {
+                "ts": datetime.datetime.now().isoformat(timespec="seconds"),
+                "event": event,
+                "plugin_version": PLUGIN_VERSION,
+            }
+            payload.update(fields)
+            with open(DEBUG_LOG_PATH, "a") as f:
+                f.write(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str) + "\n")
+        except Exception as e:
+            decky.logger.debug(f"debug log write failed: {e}")
+
+    def _config_summary(self) -> dict:
+        summary = {
+            "config_exists": os.path.exists(CONFIG_PATH),
+            "profiles_db_exists": os.path.exists(PROFILES_DB),
+            "configs_dir_exists": os.path.isdir(CONFIGS_DIR),
+        }
+        if not os.path.exists(CONFIG_PATH):
+            return summary
+        try:
+            with open(CONFIG_PATH) as f:
+                data = json.load(f)
+            summary.update({
+                "outbounds_count": len(data.get("outbounds", [])),
+                "has_dns": "dns" in data,
+                "has_route": "route" in data,
+                "tun_inbounds": [
+                    inbound.get("type")
+                    for inbound in data.get("inbounds", [])
+                    if inbound.get("type") == "tun"
+                ],
+            })
+        except Exception as e:
+            summary["config_error"] = str(e)
+        return summary
 
     # ── TUN / caps ─────────────────────────────────────────────────────────────
 
@@ -375,18 +441,59 @@ class Plugin:
             capture_output=True, text=True, env=env,
         )
 
+    def _journal_user(self, lines: int = 60) -> str:
+        env = os.environ.copy()
+        env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/run/user/1000/bus"
+        env["XDG_RUNTIME_DIR"] = "/run/user/1000"
+        r = subprocess.run(
+            ["journalctl", "--user", "-u", "hiddify", "--no-pager", "-n", str(lines)],
+            capture_output=True, text=True, env=env,
+        )
+        return ((r.stdout or "") + (("\n" + r.stderr) if r.stderr else "")).strip()
+
+    def _service_snapshot(self) -> dict:
+        active = self._systemctl_user(["is-active", "hiddify"])
+        enabled = self._systemctl_user(["is-enabled", "hiddify"])
+        show = self._systemctl_user([
+            "show",
+            "hiddify",
+            "--property=LoadState,ActiveState,SubState,Result,ExecMainStatus,ExecMainPID",
+        ])
+        show_map = {}
+        for line in (show.stdout or "").splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                show_map[key] = value
+        return {
+            "active": (active.stdout or active.stderr).strip(),
+            "enabled": (enabled.stdout or enabled.stderr).strip(),
+            "show": show_map,
+        }
+
     async def start_vpn(self) -> dict:
         decky.logger.info("start_vpn called")
         self._user_stopped = False
 
         if self._is_tun_up():
+            self._debug_event("start_vpn.already_running", tun_up=True, service=self._service_snapshot())
             return {"success": True, "message": "Already running"}
 
         state, _ = self._get_install_state()
+        grpc_up = self._is_grpc_up()
+        self._debug_event(
+            "start_vpn.entry",
+            tun_up=False,
+            grpc_up=grpc_up,
+            install_state=state,
+            config=self._config_summary(),
+            service=self._service_snapshot(),
+        )
         if state != "ready":
+            self._debug_event("start_vpn.not_ready", install_state=state)
             return {"success": False, "message": "Install Hiddify first"}
 
         if not os.path.exists(CONFIG_PATH):
+            self._debug_event("start_vpn.config_missing", config=self._config_summary())
             return {"success": False, "message": "Config not found. Open Hiddify GUI and set up a profile."}
 
         self._ensure_tun()
@@ -394,17 +501,20 @@ class Plugin:
             self._apply_caps()
 
         # Path A: gRPC is available (GUI or its service holds port 17078)
-        if self._is_grpc_up():
+        if grpc_up:
             decky.logger.info("gRPC up — starting via Core.Start")
+            self._debug_event("start_vpn.grpc_branch", grpc_up=True)
             self._grpc_start()
             for i in range(10):
                 await asyncio.sleep(1)
                 if self._is_tun_up():
                     decky.logger.info(f"VPN up via gRPC after {i+1}s")
                     self._disable_tun_ipv6()
+                    self._debug_event("start_vpn.grpc_success", elapsed=i + 1, tun_up=True, vpn_ip=self._get_vpn_ip())
                     return {"success": True, "message": "VPN started"}
             # Retry: stop then start
             decky.logger.info("tun0 not up after 10s — retrying via gRPC Stop+Start")
+            self._debug_event("start_vpn.grpc_retry", elapsed=10, service=self._service_snapshot())
             self._grpc_stop()
             await asyncio.sleep(2)
             self._grpc_start()
@@ -413,34 +523,74 @@ class Plugin:
                 if self._is_tun_up():
                     decky.logger.info(f"VPN up via gRPC retry after {i+1}s")
                     self._disable_tun_ipv6()
+                    self._debug_event("start_vpn.grpc_retry_success", elapsed=i + 1, tun_up=True, vpn_ip=self._get_vpn_ip())
                     return {"success": True, "message": "VPN started"}
             decky.logger.error("gRPC Start failed — tun0 not up after retry")
-            return {"success": False, "message": "VPN did not start. Try restarting the Hiddify app."}
+            self._debug_event(
+                "start_vpn.grpc_failure",
+                service=self._service_snapshot(),
+                journal=self._journal_user(80),
+            )
+            return {"success": False, "message": "VPN did not start. Open Logs for diagnostics."}
 
         # Path B: no gRPC → start via systemd user service
         decky.logger.info("No gRPC — starting via systemctl --user start hiddify")
+        self._debug_event("start_vpn.systemctl_branch", grpc_up=False, service=self._service_snapshot())
         r = self._systemctl_user(["start", "hiddify"])
         if r.returncode != 0:
             decky.logger.error(f"systemctl start failed: {r.stderr.strip()}")
-            return {"success": False, "message": f"Failed to start: {r.stderr.strip()}"}
+            self._debug_event(
+                "start_vpn.systemctl_start_failed",
+                rc=r.returncode,
+                stdout=(r.stdout or "").strip()[-800:],
+                stderr=(r.stderr or "").strip()[-800:],
+                service=self._service_snapshot(),
+                journal=self._journal_user(80),
+            )
+            return {"success": False, "message": "Failed to start. Open Logs for diagnostics."}
 
-        for i in range(15):
+        for i in range(SYSTEMD_START_TIMEOUT):
             await asyncio.sleep(1)
             if self._is_tun_up():
                 decky.logger.info(f"VPN up via systemctl after {i+1}s")
                 self._disable_tun_ipv6()
+                self._debug_event("start_vpn.systemctl_success", elapsed=i + 1, tun_up=True, vpn_ip=self._get_vpn_ip())
                 return {"success": True, "message": "VPN started"}
             status = self._systemctl_user(["is-active", "hiddify"])
-            if status.stdout.strip() not in ("active", "activating"):
-                logs = self._systemctl_user(["status", "hiddify"]).stdout[-300:]
+            active_state = (status.stdout or status.stderr).strip()
+            if (i + 1) in (5, 10, 20, SYSTEMD_START_TIMEOUT):
+                self._debug_event(
+                    "start_vpn.systemctl_wait",
+                    elapsed=i + 1,
+                    grpc_up=self._is_grpc_up(),
+                    active_state=active_state,
+                    service=self._service_snapshot(),
+                )
+            if active_state not in ("active", "activating"):
+                logs = self._systemctl_user(["status", "hiddify"]).stdout[-1200:]
                 decky.logger.error(f"service stopped early: {logs}")
+                self._debug_event(
+                    "start_vpn.systemctl_stopped_early",
+                    elapsed=i + 1,
+                    active_state=active_state,
+                    status=logs,
+                    journal=self._journal_user(80),
+                    service=self._service_snapshot(),
+                )
                 break
 
-        return {"success": False, "message": "VPN did not start — check Hiddify config"}
+        self._debug_event(
+            "start_vpn.systemctl_timeout",
+            service=self._service_snapshot(),
+            journal=self._journal_user(80),
+            config=self._config_summary(),
+        )
+        return {"success": False, "message": "VPN did not start. Open Logs for diagnostics."}
 
     async def stop_vpn(self) -> dict:
         decky.logger.info("stop_vpn called")
         self._user_stopped = True
+        self._debug_event("stop_vpn.entry", tun_up=self._is_tun_up(), grpc_up=self._is_grpc_up(), service=self._service_snapshot())
         try:
             # If GUI is running — send gRPC Stop (GUI stays open, only VPN disconnects)
             if self._is_grpc_up():
@@ -475,21 +625,41 @@ class Plugin:
                 subprocess.run(["sudo", "ip", "link", "delete", "tun0"], capture_output=True)
 
             decky.logger.info(f"stop_vpn done, tun_up={self._is_tun_up()}")
+            self._debug_event("stop_vpn.done", tun_up=self._is_tun_up(), service=self._service_snapshot())
             return {"success": True, "message": "VPN stopped"}
         except Exception as e:
             decky.logger.error(f"stop_vpn error: {e}")
+            self._debug_event("stop_vpn.error", error=str(e), service=self._service_snapshot(), journal=self._journal_user(60))
             return {"success": False, "message": str(e)}
 
     async def get_logs(self) -> str:
         log_path = os.path.join(decky.DECKY_PLUGIN_LOG_DIR, "hiddify.log")
         try:
-            if os.path.exists(log_path):
-                with open(log_path) as f:
-                    lines = f.readlines()
-                return "".join(lines[-40:])
+            snapshot = json.dumps({
+                "plugin_version": PLUGIN_VERSION,
+                "tun_up": self._is_tun_up(),
+                "grpc_up": self._is_grpc_up(),
+                "vpn_ip": self._get_vpn_ip(),
+                "install_state": self._get_install_state()[0],
+                "config": self._config_summary(),
+                "service": self._service_snapshot(),
+            }, ensure_ascii=False, indent=2)
+            sections = [
+                ("Snapshot", snapshot),
+                ("Decky Debug", self._tail_file(DEBUG_LOG_PATH, 80)),
+                ("Decky Plugin Log", self._tail_file(log_path, 60)),
+                ("Hiddify App Log", self._tail_file(APP_LOG_PATH, 60)),
+                ("hiddify.service Journal", self._journal_user(80)),
+            ]
+            rendered = [
+                f"== {title} ==\n{content}"
+                for title, content in sections
+                if content
+            ]
+            return "\n\n".join(rendered) if rendered else "No logs"
         except Exception as e:
             return f"Error: {e}"
-        return ""
+        return "No logs"
 
     # ── Background monitor ─────────────────────────────────────────────────────
 
@@ -540,6 +710,7 @@ class Plugin:
     async def _main(self):
         decky.logger.info(f"Hiddify VPN plugin loaded — uid={os.getuid()}")
         os.makedirs(decky.DECKY_PLUGIN_SETTINGS_DIR, exist_ok=True)
+        self._debug_event("plugin.load", uid=os.getuid(), install_state=self._get_install_state()[0], config=self._config_summary())
 
         # Re-apply sudoers + polkit on every load (survives SteamOS A/B updates)
         try:
@@ -555,31 +726,36 @@ class Plugin:
         for polkit_dir in ("/etc/polkit-1/rules.d", "/usr/share/polkit-1/rules.d"):
             try:
                 os.makedirs(polkit_dir, exist_ok=True)
+                target_path = f"{polkit_dir}/10-hiddify.rules"
+                tmp_path = f"{polkit_dir}/.10-hiddify.rules.tmp"
                 polkit_rule = """\
 polkit.addRule(function(action, subject) {
-    var allowed = [
-        "org.freedesktop.resolve1.set-domains",
-        "org.freedesktop.resolve1.set-default-route",
-        "org.freedesktop.resolve1.set-dns-servers",
-        "org.freedesktop.resolve1.set-dns-over-tls",
-        "org.freedesktop.resolve1.set-dnssec",
-        "org.freedesktop.resolve1.set-nta",
-        "org.freedesktop.NetworkManager.network-control",
-        "org.freedesktop.NetworkManager.settings.modify.system",
-        "org.freedesktop.NetworkManager.wifi.share.open",
-        "net.hiddify.app",
-        "com.hiddify.app",
-    ];
-    if (subject.user === "deck" && allowed.indexOf(action.id) !== -1) {
-        return polkit.Result.YES;
-    }
-    if (subject.user === "deck" && action.id.indexOf("hiddify") !== -1) {
-        return polkit.Result.YES;
+    var YES = polkit.Result.YES;
+    var permission = {
+        "org.freedesktop.resolve1.set-domains": YES,
+        "org.freedesktop.resolve1.set-default-route": YES,
+        "org.freedesktop.resolve1.set-dns-servers": YES,
+        "org.freedesktop.resolve1.set-dns-over-tls": YES,
+        "org.freedesktop.resolve1.set-dnssec": YES,
+        "org.freedesktop.resolve1.set-dnssec-negative-trust-anchors": YES,
+        "org.freedesktop.resolve1.set-llmnr": YES,
+        "org.freedesktop.resolve1.set-mdns": YES,
+        "org.freedesktop.resolve1.revert": YES,
+        "org.freedesktop.NetworkManager.network-control": YES,
+        "org.freedesktop.NetworkManager.reload": YES,
+        "org.freedesktop.NetworkManager.settings.modify.global-dns": YES,
+        "org.freedesktop.NetworkManager.settings.modify.system": YES,
+        "org.freedesktop.NetworkManager.wifi.share.open": YES
+    };
+    if (subject.user == "deck") {
+        return permission[action.id];
     }
 });
 """
-                with open(f"{polkit_dir}/10-hiddify.rules", "w") as f:
+                with open(tmp_path, "w") as f:
                     f.write(polkit_rule)
+                os.chmod(tmp_path, 0o644)
+                os.replace(tmp_path, target_path)
                 decky.logger.info(f"polkit rule written to {polkit_dir}")
                 break  # success — no need to try fallback
             except Exception as e:
@@ -593,6 +769,7 @@ polkit.addRule(function(action, subject) {
 
     async def _unload(self):
         decky.logger.info("Hiddify VPN plugin unloading")
+        self._debug_event("plugin.unload", tun_up=self._is_tun_up(), service=self._service_snapshot())
         if self._monitor_task:
             self._monitor_task.cancel()
 

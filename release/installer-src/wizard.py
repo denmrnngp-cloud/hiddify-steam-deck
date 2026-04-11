@@ -5,7 +5,7 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, GLib, Gdk, Pango, GdkPixbuf
 
-import os, sys, re, subprocess, threading, shutil
+import os, sys, re, subprocess, threading, shutil, zipfile, json
 
 # WORK_DIR передаётся как argv[1] (путь где лежат файлы установщика)
 WORK_DIR   = sys.argv[1] if len(sys.argv) > 1 else os.path.dirname(os.path.abspath(__file__))
@@ -14,6 +14,25 @@ DECKY_ZIP  = os.path.join(WORK_DIR, "decky-hiddify.zip")
 ICON_PATH  = os.path.join(WORK_DIR, "hiddify.png")
 DECKY_DIR   = "/home/deck/homebrew/plugins"
 HIDDIFY_CLI = "/opt/hiddify/HiddifyCli"
+APP_DIR     = "/home/deck/.local/share/app.hiddify.com"
+SYSTEM_APP_DIR = "/var/lib/hiddify"
+
+
+def packaged_version():
+    if not os.path.exists(DECKY_ZIP):
+        return "unknown"
+    try:
+        with zipfile.ZipFile(DECKY_ZIP) as zf:
+            for candidate in ("decky-hiddify/plugin.json", "plugin.json"):
+                if candidate in zf.namelist():
+                    with zf.open(candidate) as f:
+                        return str(json.load(f).get("version", "unknown"))
+    except Exception:
+        pass
+    return "unknown"
+
+
+APP_VERSION = packaged_version()
 
 # ── License ────────────────────────────────────────────────────────────────────
 
@@ -239,6 +258,7 @@ class HiddifyWizard(Gtk.Window):
             self.set_icon_from_file(ICON_PATH)
 
         self.install_decky = False
+        self.clean_install = os.environ.get("HIDDIFY_CLEAN_INSTALL") == "1"
         self.sudo_password = ""
         self.install_ok    = False
         self._current      = 0
@@ -400,7 +420,7 @@ class HiddifyWizard(Gtk.Window):
         img = icon_image(120)
         if img:
             left.pack_start(img, False, False, 0)
-        left.pack_start(lbl("Steam Deck Port  ·  v1.0", "subtitle-label", xalign=0.5), False, False, 8)
+        left.pack_start(lbl(f"Steam Deck Port  ·  v{APP_VERSION}", "subtitle-label", xalign=0.5), False, False, 8)
         outer.pack_start(left, False, False, 0)
 
         outer.pack_start(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL), False, False, 0)
@@ -433,6 +453,11 @@ class HiddifyWizard(Gtk.Window):
             "⚠  Requires sudo password. Files are installed to /opt/hiddify/",
             "warning-label"
         ), False, False, 4)
+        if self.clean_install and os.path.exists(HIDDIFY_CLI):
+            right.pack_start(lbl(
+                "Existing Hiddify client, plugin, services and saved VPN state will be removed first.",
+                "warning-label"
+            ), False, False, 0)
 
         outer.pack_start(right, True, True, 0)
         self._stack.add_named(outer, "welcome")
@@ -707,7 +732,11 @@ class HiddifyWizard(Gtk.Window):
                 stderr=subprocess.STDOUT,
                 text=True, bufsize=1,
                 cwd="/tmp",
-                env={**os.environ, "HIDDIFY_WIZARD": "1"},
+                env={
+                    **os.environ,
+                    "HIDDIFY_WIZARD": "1",
+                    "HIDDIFY_CLEAN_INSTALL": "1" if self.clean_install else os.environ.get("HIDDIFY_CLEAN_INSTALL", ""),
+                },
             )
             proc.stdin.write(self.sudo_password + "\n")
             proc.stdin.flush()
@@ -851,8 +880,8 @@ class AlreadyInstalledWindow(Gtk.Window):
         radio_box.set_border_width(4)
 
         for r, sublabel in [
-            (self._r_reinstall, "The installation wizard will run again"),
-            (self._r_uninstall, "Removes /opt/hiddify/, service and shortcuts"),
+            (self._r_reinstall, "Runs a clean reinstall: removes old client, plugin and saved state, then installs again"),
+            (self._r_uninstall, "Removes /opt/hiddify/, plugin, services, shortcuts and saved state"),
         ]:
             rb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
             rb.pack_start(r, False, False, 0)
@@ -970,6 +999,7 @@ class AlreadyInstalledWindow(Gtk.Window):
                     ["sudo", "-S", "rm", "-f",
                      "/home/deck/.config/systemd/user/hiddify.service"],
                     ["sudo", "-S", "rm", "-rf", "/opt/hiddify"],
+                    ["sudo", "-S", "rm", "-rf", APP_DIR, SYSTEM_APP_DIR],
                     ["sudo", "-S", "rm", "-f",
                      "/home/deck/.local/share/applications/hiddify.desktop",
                      "/home/deck/.local/share/icons/hicolor/256x256/apps/hiddify.png",
@@ -1050,7 +1080,7 @@ def main():
     apply_css()
 
     w, h = adaptive_size()
-    if os.path.exists(HIDDIFY_CLI):
+    if os.path.exists(HIDDIFY_CLI) and os.environ.get("HIDDIFY_CLEAN_INSTALL") != "1":
         win = AlreadyInstalledWindow()
         win.show_all()
         win.resize(min(w, 560), min(h, 380))
