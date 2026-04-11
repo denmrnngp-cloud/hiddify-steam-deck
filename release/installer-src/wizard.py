@@ -244,7 +244,7 @@ class HiddifyWizard(Gtk.Window):
     P_PROGRESS = 4
     P_FINISH   = 5
 
-    def __init__(self):
+    def __init__(self, clean_install=False):
         super().__init__()
 
         w, h = adaptive_size()
@@ -258,7 +258,7 @@ class HiddifyWizard(Gtk.Window):
             self.set_icon_from_file(ICON_PATH)
 
         self.install_decky = False
-        self.clean_install = os.environ.get("HIDDIFY_CLEAN_INSTALL") == "1"
+        self.clean_install = clean_install or os.environ.get("HIDDIFY_CLEAN_INSTALL") == "1"
         self.sudo_password = ""
         self.install_ok    = False
         self._current      = 0
@@ -915,7 +915,7 @@ class AlreadyInstalledWindow(Gtk.Window):
     def _on_next(self, btn):
         if self._action == "reinstall":
             self.hide()
-            win = HiddifyWizard()
+            win = HiddifyWizard(clean_install=True)
             win.show_all()
         else:
             self._do_uninstall_flow()
