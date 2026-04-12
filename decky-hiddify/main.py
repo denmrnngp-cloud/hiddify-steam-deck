@@ -367,6 +367,27 @@ class Plugin:
 
         return True
 
+    def _sync_active_profile_config(self) -> dict:
+        active = self._get_active_profile()
+        result = {
+            "active_profile": active["name"] if active else "",
+            "active_profile_id": active["id"] if active else "",
+            "attempted": False,
+            "success": False,
+            "profile_config_exists": False,
+        }
+        if not active:
+            return result
+
+        profile_config_path = os.path.join(CONFIGS_DIR, f"{active['id']}.json")
+        result["profile_config_exists"] = os.path.exists(profile_config_path)
+        if not result["profile_config_exists"] or not os.path.exists(CONFIG_PATH):
+            return result
+
+        result["attempted"] = True
+        result["success"] = self._rebuild_config(active["id"])
+        return result
+
     # ── Plugin API: status ─────────────────────────────────────────────────────
 
     async def get_install_status(self) -> dict:
@@ -495,6 +516,13 @@ class Plugin:
         if not os.path.exists(CONFIG_PATH):
             self._debug_event("start_vpn.config_missing", config=self._config_summary())
             return {"success": False, "message": "Config not found. Open Hiddify GUI and set up a profile."}
+
+        profile_sync = self._sync_active_profile_config()
+        self._debug_event(
+            "start_vpn.profile_sync",
+            **profile_sync,
+            config=self._config_summary(),
+        )
 
         self._ensure_tun()
         if not self._check_caps():

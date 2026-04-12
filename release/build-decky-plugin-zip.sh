@@ -17,6 +17,13 @@ PY
 
 mkdir -p "$TMP_DIR/decky-hiddify"
 
+for required in bin dist main.py package.json plugin.json; do
+    if [ ! -e "$PLUGIN_DIR/$required" ]; then
+        echo "Missing required plugin artifact: $PLUGIN_DIR/$required" >&2
+        exit 1
+    fi
+done
+
 cp -r \
     "$PLUGIN_DIR/bin" \
     "$PLUGIN_DIR/dist" \
@@ -33,5 +40,16 @@ cp -r \
 cp "$TMP_DIR/decky-hiddify.zip" "$PLUGIN_DIR/decky-hiddify.zip"
 cp "$TMP_DIR/decky-hiddify.zip" "$ROOT_DIR/release/installer-src/decky-hiddify.zip"
 cp "$TMP_DIR/decky-hiddify.zip" "$ROOT_DIR/release/decky-hiddify-v${VERSION}.zip"
+
+for archive in \
+    "$PLUGIN_DIR/decky-hiddify.zip" \
+    "$ROOT_DIR/release/installer-src/decky-hiddify.zip" \
+    "$ROOT_DIR/release/decky-hiddify-v${VERSION}.zip"
+do
+    if ! unzip -Z1 "$archive" | grep -qx 'decky-hiddify/package.json'; then
+        echo "package.json missing in $archive" >&2
+        exit 1
+    fi
+done
 
 echo "Built decky-hiddify-v${VERSION}.zip with package.json included"
