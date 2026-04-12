@@ -103,7 +103,7 @@ uninstall_hiddify() {
     fi
 
     # ── 3. Remove sudoers and polkit rules ──────────────────────────────────
-    rm -f /etc/sudoers.d/hiddify /etc/sudoers.d/zz-deck-nopasswd
+    rm -f /etc/sudoers.d/hiddify /etc/sudoers.d/zz-hiddify /etc/sudoers.d/zz-deck-nopasswd
     rm -f /etc/polkit-1/rules.d/10-hiddify.rules
     rm -f /usr/share/polkit-1/rules.d/10-hiddify.rules
     systemctl restart polkit 2>/dev/null || true
@@ -238,11 +238,15 @@ else
     warn "setcap not found — VPN requires root or AmbientCapabilities"
 fi
 
-# Passwordless sudo for HiddifyCli
-SUDOERS_FILE="/etc/sudoers.d/hiddify"
-echo "deck ALL=(ALL) NOPASSWD: $INSTALL_DIR/HiddifyCli *" > "$SUDOERS_FILE"
+# Passwordless sudo for HiddifyCli and cleanup helpers used by the Decky plugin
+SUDOERS_FILE="/etc/sudoers.d/zz-hiddify"
+cat > "$SUDOERS_FILE" <<EOF
+deck ALL=(ALL) NOPASSWD: $INSTALL_DIR/HiddifyCli *
+deck ALL=(ALL) NOPASSWD: /usr/bin/ip *
+deck ALL=(ALL) NOPASSWD: /usr/bin/fuser *
+EOF
 chmod 0440 "$SUDOERS_FILE"
-ok "Passwordless sudo configured for HiddifyCli"
+ok "Passwordless sudo configured for HiddifyCli and cleanup helpers"
 
 # Polkit rule — allow deck user to configure DNS/routes without password prompts.
 # Written to /etc/polkit-1/rules.d/ which is on the writable partition and

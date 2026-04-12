@@ -178,10 +178,25 @@ class Plugin:
         r = subprocess.run(["getcap", CLI_PATH], capture_output=True, text=True)
         return "cap_net_admin" in r.stdout
 
-    def _is_tun_up(self) -> bool:
+    def _tun_exists(self) -> bool:
         try:
             r = subprocess.run(["ip", "link", "show", "tun0"], capture_output=True, text=True)
-            return r.returncode == 0 and "tun0" in r.stdout
+            return r.returncode == 0
+        except Exception:
+            return False
+
+    def _is_tun_up(self) -> bool:
+        try:
+            r = subprocess.run(["ip", "-j", "addr", "show", "tun0"], capture_output=True, text=True)
+            if r.returncode != 0:
+                return False
+            data = json.loads(r.stdout)
+            if not data:
+                return False
+            tun = data[0]
+            if tun.get("operstate") == "DOWN":
+                return False
+            return any(addr.get("local") for addr in tun.get("addr_info", []))
         except Exception:
             return False
 
@@ -200,6 +215,37 @@ class Plugin:
         # HiddifyCli always runs as gRPC server (app-hiddify@UUID.service from GUI).
         # VPN state is determined by tun0 only; process presence is irrelevant.
         return False
+
+    @staticmethod
+    def _run_capture(args: list[str]) -> subprocess.CompletedProcess:
+        return subprocess.run(args, capture_output=True, text=True)
+
+    def _sudo_run(self, args: list[str]) -> subprocess.CompletedProcess:
+        return self._run_capture(["sudo", "-n"] + args)
+
+    def _cleanup_tun(self) -> dict:
+        result = {}
+
+        revert = self._run_capture(["/usr/bin/resolvectl", "revert", "tun0"])
+        result["resolvectl_revert"] = {
+            "rc": revert.returncode,
+            "stderr": (revert.stderr or "").strip()[-300:],
+        }
+
+        fuser = self._sudo_run(["/usr/bin/fuser", "-k", "17078/tcp"])
+        result["fuser_kill_17078"] = {
+            "rc": fuser.returncode,
+            "stderr": (fuser.stderr or "").strip()[-300:],
+        }
+
+        delete = self._sudo_run(["/usr/bin/ip", "link", "delete", "tun0"])
+        result["ip_link_delete_tun0"] = {
+            "rc": delete.returncode,
+            "stderr": (delete.stderr or "").strip()[-300:],
+        }
+
+        result["tun_up_after_cleanup"] = self._is_tun_up()
+        return result
 
     @staticmethod
     def _tail_file(path: str, max_lines: int = 40) -> str:
@@ -419,10 +465,19 @@ class Plugin:
         return self._read_profiles()
 
     async def switch_profile(self, profile_id: str) -> dict:
+        self._debug_event(
+            "switch_profile.entry",
+            profile_id=profile_id,
+            tun_up=self._is_tun_up(),
+            service=self._service_snapshot(),
+            config=self._config_summary(),
+        )
         if self._is_tun_up() or self._process_running():
+            self._debug_event("switch_profile.blocked_running", profile_id=profile_id)
             return {"success": False, "message": "Stop VPN before switching profile"}
         try:
             if not self._rebuild_config(profile_id):
+                self._debug_event("switch_profile.rebuild_failed", profile_id=profile_id)
                 return {"success": False, "message": "Failed to rebuild config"}
 
             db = sqlite3.connect(PROFILES_DB)
@@ -434,9 +489,16 @@ class Plugin:
             profiles = self._read_profiles()
             name = next((p["name"] for p in profiles if p["id"] == profile_id), profile_id)
             decky.logger.info(f"Switched to profile: {name}")
+            self._debug_event(
+                "switch_profile.done",
+                profile_id=profile_id,
+                profile_name=name,
+                config=self._config_summary(),
+            )
             return {"success": True, "message": f"Profile: {name}"}
         except Exception as e:
             decky.logger.error(f"switch_profile: {e}")
+            self._debug_event("switch_profile.error", profile_id=profile_id, error=str(e))
             return {"success": False, "message": str(e)}
 
     # ── Plugin API: repair ─────────────────────────────────────────────────────
@@ -491,6 +553,10 @@ class Plugin:
             "show": show_map,
         }
 
+    @staticmethod
+    def _service_is_active(service: dict) -> bool:
+        return service.get("active") in ("active", "activating")
+
     async def start_vpn(self) -> dict:
         decky.logger.info("start_vpn called")
         self._user_stopped = False
@@ -501,13 +567,14 @@ class Plugin:
 
         state, _ = self._get_install_state()
         grpc_up = self._is_grpc_up()
+        service = self._service_snapshot()
         self._debug_event(
             "start_vpn.entry",
             tun_up=False,
             grpc_up=grpc_up,
             install_state=state,
             config=self._config_summary(),
-            service=self._service_snapshot(),
+            service=service,
         )
         if state != "ready":
             self._debug_event("start_vpn.not_ready", install_state=state)
@@ -528,47 +595,25 @@ class Plugin:
         if not self._check_caps():
             self._apply_caps()
 
-        # Path A: gRPC is available (GUI or its service holds port 17078)
-        if grpc_up:
-            decky.logger.info("gRPC up — starting via Core.Start")
-            self._debug_event("start_vpn.grpc_branch", grpc_up=True)
-            self._grpc_start()
-            for i in range(10):
-                await asyncio.sleep(1)
-                if self._is_tun_up():
-                    decky.logger.info(f"VPN up via gRPC after {i+1}s")
-                    self._disable_tun_ipv6()
-                    self._debug_event("start_vpn.grpc_success", elapsed=i + 1, tun_up=True, vpn_ip=self._get_vpn_ip())
-                    return {"success": True, "message": "VPN started"}
-            # Retry: stop then start
-            decky.logger.info("tun0 not up after 10s — retrying via gRPC Stop+Start")
-            self._debug_event("start_vpn.grpc_retry", elapsed=10, service=self._service_snapshot())
-            self._grpc_stop()
-            await asyncio.sleep(2)
-            self._grpc_start()
-            for i in range(8):
-                await asyncio.sleep(1)
-                if self._is_tun_up():
-                    decky.logger.info(f"VPN up via gRPC retry after {i+1}s")
-                    self._disable_tun_ipv6()
-                    self._debug_event("start_vpn.grpc_retry_success", elapsed=i + 1, tun_up=True, vpn_ip=self._get_vpn_ip())
-                    return {"success": True, "message": "VPN started"}
-            decky.logger.error("gRPC Start failed — tun0 not up after retry")
-            self._debug_event(
-                "start_vpn.grpc_failure",
-                service=self._service_snapshot(),
-                journal=self._journal_user(80),
-            )
-            return {"success": False, "message": "VPN did not start. Open Logs for diagnostics."}
+        # Managed user service is the most reliable start path on Steam Deck.
+        # If it is already alive but tun0 is down, restart it instead of trying
+        # Core.Start over the lingering gRPC socket.
+        service = self._service_snapshot()
+        managed_service_active = self._service_is_active(service)
+        if managed_service_active:
+            systemctl_action = "restart"
+            decky.logger.info("Managed hiddify.service active — restarting via systemctl --user")
+            self._debug_event("start_vpn.systemctl_restart_branch", grpc_up=grpc_up, service=service)
+        else:
+            systemctl_action = "start"
+            decky.logger.info("Managed hiddify.service inactive — starting via systemctl --user")
+            self._debug_event("start_vpn.systemctl_branch", grpc_up=grpc_up, service=service)
 
-        # Path B: no gRPC → start via systemd user service
-        decky.logger.info("No gRPC — starting via systemctl --user start hiddify")
-        self._debug_event("start_vpn.systemctl_branch", grpc_up=False, service=self._service_snapshot())
-        r = self._systemctl_user(["start", "hiddify"])
+        r = self._systemctl_user([systemctl_action, "hiddify"])
         if r.returncode != 0:
-            decky.logger.error(f"systemctl start failed: {r.stderr.strip()}")
+            decky.logger.error(f"systemctl {systemctl_action} failed: {r.stderr.strip()}")
             self._debug_event(
-                "start_vpn.systemctl_start_failed",
+                f"start_vpn.systemctl_{systemctl_action}_failed",
                 rc=r.returncode,
                 stdout=(r.stdout or "").strip()[-800:],
                 stderr=(r.stderr or "").strip()[-800:],
@@ -618,10 +663,30 @@ class Plugin:
     async def stop_vpn(self) -> dict:
         decky.logger.info("stop_vpn called")
         self._user_stopped = True
-        self._debug_event("stop_vpn.entry", tun_up=self._is_tun_up(), grpc_up=self._is_grpc_up(), service=self._service_snapshot())
+        service = self._service_snapshot()
+        self._debug_event(
+            "stop_vpn.entry",
+            tun_up=self._is_tun_up(),
+            tun_exists=self._tun_exists(),
+            grpc_up=self._is_grpc_up(),
+            service=service,
+        )
         try:
-            # If GUI is running — send gRPC Stop (GUI stays open, only VPN disconnects)
-            if self._is_grpc_up():
+            # If the managed user service is active, stop it first.
+            if self._service_is_active(service):
+                self._systemctl_user(["stop", "hiddify"])
+                await asyncio.sleep(2)
+
+                service = self._service_snapshot()
+                if self._service_is_active(service):
+                    self._systemctl_user(["kill", "-s", "KILL", "hiddify"])
+                    await asyncio.sleep(1)
+                    self._systemctl_user(["stop", "hiddify"])
+                    await asyncio.sleep(2)
+                    service = self._service_snapshot()
+
+            # If GUI is running without the user service — send gRPC Stop
+            elif self._is_grpc_up():
                 decky.logger.info("GUI gRPC detected — stopping via gRPC Core.Stop")
                 self._grpc_stop()
                 await asyncio.sleep(3)
@@ -630,30 +695,41 @@ class Plugin:
                     return {"success": True, "message": "VPN stopped"}
                 decky.logger.warning("gRPC Stop sent but tun0 still up — falling back to systemctl")
 
-            # Stop systemd user service (covers VPN started by plugin or systemd)
-            self._systemctl_user(["stop", "hiddify"])
-            await asyncio.sleep(2)
-
             if not self._is_tun_up():
+                cleanup = {}
+                if self._tun_exists():
+                    cleanup = self._cleanup_tun()
+                service = self._service_snapshot()
+                if self._service_is_active(service):
+                    self._debug_event("stop_vpn.service_still_active", tun_up=False, tun_exists=self._tun_exists(), cleanup=cleanup, service=service)
+                    return {"success": False, "message": "VPN service is still active. Open Logs for diagnostics."}
+                if self._tun_exists():
+                    self._debug_event("stop_vpn.stale_tun_remaining", tun_up=False, tun_exists=True, cleanup=cleanup, service=service)
+                    return {"success": False, "message": "VPN interface cleanup failed. Open Logs for diagnostics."}
                 decky.logger.info("VPN stopped via systemctl")
+                self._debug_event("stop_vpn.done", tun_up=False, tun_exists=False, cleanup=cleanup, service=service)
                 return {"success": True, "message": "VPN stopped"}
 
             # Last resort: kill any remaining HiddifyCli processes
             subprocess.run(["pkill", "-TERM", "-f", "HiddifyC[l]i"], capture_output=True)
             await asyncio.sleep(1)
             subprocess.run(["pkill", "-KILL", "-f", "HiddifyC[l]i"], capture_output=True)
-
-            # Free gRPC port if still held by a stale process
-            subprocess.run(["sudo", "fuser", "-k", "17078/tcp"], capture_output=True)
-
-            # Force-remove tun0 if still present
+            self._systemctl_user(["stop", "hiddify"])
+            await asyncio.sleep(2)
             if self._is_tun_up():
                 await asyncio.sleep(2)
-            if self._is_tun_up():
-                subprocess.run(["sudo", "ip", "link", "delete", "tun0"], capture_output=True)
 
-            decky.logger.info(f"stop_vpn done, tun_up={self._is_tun_up()}")
-            self._debug_event("stop_vpn.done", tun_up=self._is_tun_up(), service=self._service_snapshot())
+            cleanup = {}
+            if self._is_tun_up():
+                cleanup = self._cleanup_tun()
+
+            tun_up = self._is_tun_up()
+            service = self._service_snapshot()
+            decky.logger.info(f"stop_vpn done, tun_up={tun_up}")
+            tun_exists = self._tun_exists()
+            self._debug_event("stop_vpn.done", tun_up=tun_up, tun_exists=tun_exists, cleanup=cleanup, service=service)
+            if tun_up or tun_exists or self._service_is_active(service):
+                return {"success": False, "message": "VPN stop incomplete. Open Logs for diagnostics."}
             return {"success": True, "message": "VPN stopped"}
         except Exception as e:
             decky.logger.error(f"stop_vpn error: {e}")
@@ -742,9 +818,11 @@ class Plugin:
 
         # Re-apply sudoers + polkit on every load (survives SteamOS A/B updates)
         try:
-            sudoers_path = "/etc/sudoers.d/hiddify"
+            sudoers_path = "/etc/sudoers.d/zz-hiddify"
             with open(sudoers_path, "w") as f:
                 f.write(f"deck ALL=(ALL) NOPASSWD: {CLI_PATH} *\n")
+                f.write("deck ALL=(ALL) NOPASSWD: /usr/bin/ip *\n")
+                f.write("deck ALL=(ALL) NOPASSWD: /usr/bin/fuser *\n")
             os.chmod(sudoers_path, 0o440)
         except Exception as e:
             decky.logger.warning(f"Could not write sudoers: {e}")
