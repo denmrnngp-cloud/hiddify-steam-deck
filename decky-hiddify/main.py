@@ -287,9 +287,20 @@ class Plugin:
         try:
             with open(CONFIG_PATH) as f:
                 data = json.load(f)
+            outbound_tags = {
+                item.get("tag")
+                for item in data.get("outbounds", [])
+                if isinstance(item, dict) and item.get("tag")
+            }
+            endpoint_tags = {
+                item.get("tag")
+                for item in data.get("endpoints", [])
+                if isinstance(item, dict) and item.get("tag")
+            }
             summary.update({
                 "outbounds_count": len(data.get("outbounds", [])),
                 "endpoints_count": len(data.get("endpoints", [])),
+                "duplicate_outbound_endpoint_tags": sorted(outbound_tags & endpoint_tags),
                 "has_dns": "dns" in data,
                 "has_route": "route" in data,
                 "tun_inbounds": [
@@ -371,6 +382,104 @@ class Plugin:
                 return p
         profiles = self._read_profiles()
         return profiles[0] if profiles else None
+
+    @staticmethod
+    def _unique_tag(base: str, used_tags: set[str]) -> str:
+        candidate = base
+        index = 2
+        while candidate in used_tags:
+            candidate = f"{base}-{index}"
+            index += 1
+        used_tags.add(candidate)
+        return candidate
+
+    def _normalize_endpoint_tag_collisions(self, config: dict) -> dict:
+        """Fix HiddifyCli build output where generated outbounds collide with endpoint tags."""
+        result = {
+            "renamed": [],
+            "reference_rewrites": 0,
+            "duplicate_tags_before": [],
+            "duplicate_tags_after": [],
+        }
+        outbounds = config.get("outbounds", [])
+        endpoints = config.get("endpoints", [])
+        if not isinstance(outbounds, list) or not isinstance(endpoints, list):
+            return result
+
+        outbound_tags = {
+            item.get("tag")
+            for item in outbounds
+            if isinstance(item, dict) and item.get("tag")
+        }
+        endpoint_tags = [
+            item.get("tag")
+            for item in endpoints
+            if isinstance(item, dict) and item.get("tag")
+        ]
+        result["duplicate_tags_before"] = sorted(outbound_tags & set(endpoint_tags))
+
+        used_tags = set(outbound_tags) | set(endpoint_tags)
+        seen_endpoint_tags = set()
+        rename_map = {}
+        for endpoint in endpoints:
+            if not isinstance(endpoint, dict):
+                continue
+            old_tag = endpoint.get("tag")
+            if not old_tag:
+                continue
+            if old_tag in outbound_tags or old_tag in seen_endpoint_tags:
+                new_tag = self._unique_tag(f"{old_tag}-endpoint", used_tags)
+                endpoint["tag"] = new_tag
+                rename_map.setdefault(old_tag, new_tag)
+                result["renamed"].append({"old": old_tag, "new": new_tag})
+            else:
+                seen_endpoint_tags.add(old_tag)
+
+        if not rename_map:
+            return result
+
+        generated_group_tags = {"lowest", "auto", "balance"}
+
+        def rewrite_outbound_list(values, parent_tag):
+            if not isinstance(values, list):
+                return values
+            rewritten = list(values)
+            for old_tag, new_tag in rename_map.items():
+                occurrences = [i for i, value in enumerate(rewritten) if value == old_tag]
+                if not occurrences:
+                    continue
+                if parent_tag == old_tag or parent_tag in generated_group_tags or old_tag not in outbound_tags:
+                    indexes_to_rewrite = occurrences
+                elif len(occurrences) > 1:
+                    indexes_to_rewrite = occurrences[1:]
+                else:
+                    indexes_to_rewrite = []
+                for index in indexes_to_rewrite:
+                    rewritten[index] = new_tag
+                    result["reference_rewrites"] += 1
+            return rewritten
+
+        def walk(node, parent_tag=None):
+            if isinstance(node, dict):
+                current_tag = node.get("tag", parent_tag)
+                for key, value in list(node.items()):
+                    if key == "outbounds" and isinstance(value, list) and all(isinstance(item, str) for item in value):
+                        node[key] = rewrite_outbound_list(value, current_tag)
+                    else:
+                        walk(value, current_tag)
+            elif isinstance(node, list):
+                for item in node:
+                    walk(item, parent_tag)
+
+        walk(config)
+
+        new_endpoint_tags = {
+            item.get("tag")
+            for item in endpoints
+            if isinstance(item, dict) and item.get("tag")
+        }
+        result["duplicate_tags_after"] = sorted(outbound_tags & new_endpoint_tags)
+        return result
 
     def _rebuild_config(self, profile_id: str) -> dict:
         """Regenerate current-config.json from the selected profile via HiddifyCli."""
@@ -454,8 +563,17 @@ class Plugin:
             result["error"] = error
             return result
 
+        tag_normalization = self._normalize_endpoint_tag_collisions(rebuilt)
+        result["tag_normalization"] = tag_normalization
+        if tag_normalization.get("duplicate_tags_after"):
+            error = f"Built config still has duplicate outbound/endpoint tags: {tag_normalization['duplicate_tags_after']}"
+            decky.logger.error(error)
+            result["error"] = error
+            return result
+
         result["rebuilt_summary"] = {
             "outbounds_count": len(rebuilt.get("outbounds", [])),
+            "endpoints_count": len(rebuilt.get("endpoints", [])),
             "has_dns": "dns" in rebuilt,
             "has_route": "route" in rebuilt,
             "tun_inbounds": [
