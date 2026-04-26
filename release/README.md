@@ -202,9 +202,10 @@ decky-hiddify/
     └── index.tsx  # Frontend (React/TSX): panel UI
 ```
 
-**Profile switching** reads profiles from `~/.local/share/app.hiddify.com/db.sqlite`,
-rebuilds `current-config.json` by merging the selected profile's outbounds with
-the existing TUN/DNS/route configuration. VPN must be stopped before switching.
+**Profile switching** reads profiles from `~/.local/share/app.hiddify.com/db.sqlite`
+and regenerates `current-config.json` via `HiddifyCli build` from the selected
+profile config. This keeps balancer/selector/endpoints handling aligned with the
+desktop client. VPN must be stopped before switching.
 
 **GUI sync**: when stopping VPN from the plugin, it queries `systemctl --user list-units 'app-hiddify@*.service'`
 to get the exact transient unit name, then stops it. Also sends `SIGTERM` to the `hiddify` GUI process directly.

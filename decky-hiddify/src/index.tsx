@@ -142,6 +142,7 @@ function VpnPanel() {
   };
 
   const isOn = status.connected;
+  const isBusy = loading || status.running;
 
   // Status dot color
   const dotColor = status.connected ? "#4ade80" : status.running ? "#facc15" : "#f87171";
@@ -186,13 +187,13 @@ function VpnPanel() {
           <PanelSectionRow>
             <div style={{ width: "100%", paddingTop: 4 }}>
               <div style={{ fontSize: 11, opacity: 0.5, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                {isOn ? "Stop VPN to change profile" : "Profile"}
+                {isBusy ? "Wait for VPN before changing profile" : "Profile"}
               </div>
               {profiles.map(p => (
                 <ButtonItem
                   key={p.id}
-                  onClick={() => !isOn && !switching && !p.active && handleSwitch(p.id)}
-                  disabled={isOn || switching || p.active}
+                  onClick={() => !isBusy && !switching && !p.active && handleSwitch(p.id)}
+                  disabled={isBusy || switching || p.active}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <div style={{

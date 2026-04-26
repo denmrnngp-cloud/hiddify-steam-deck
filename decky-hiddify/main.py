@@ -212,9 +212,8 @@ class Plugin:
         return ""
 
     def _process_running(self) -> bool:
-        # HiddifyCli always runs as gRPC server (app-hiddify@UUID.service from GUI).
-        # VPN state is determined by tun0 only; process presence is irrelevant.
-        return False
+        service = self._service_snapshot()
+        return self._service_is_active(service) or self._is_grpc_up()
 
     @staticmethod
     def _run_capture(args: list[str]) -> subprocess.CompletedProcess:
@@ -290,6 +289,7 @@ class Plugin:
                 data = json.load(f)
             summary.update({
                 "outbounds_count": len(data.get("outbounds", [])),
+                "endpoints_count": len(data.get("endpoints", [])),
                 "has_dns": "dns" in data,
                 "has_route": "route" in data,
                 "tun_inbounds": [
@@ -372,46 +372,102 @@ class Plugin:
         profiles = self._read_profiles()
         return profiles[0] if profiles else None
 
-    def _rebuild_config(self, profile_id: str) -> bool:
-        """Replace outbounds in current-config.json with those from profile config."""
-        profile_config_path = os.path.join(CONFIGS_DIR, f"{profile_id}.json")
-        if not os.path.exists(profile_config_path):
-            decky.logger.error(f"Profile config not found: {profile_config_path}")
-            return False
-        if not os.path.exists(CONFIG_PATH):
-            decky.logger.error(f"current-config.json not found")
-            return False
-
-        with open(profile_config_path) as f:
-            profile_data = json.load(f)
-        profile_outbounds = profile_data.get("outbounds", [])
-        if not profile_outbounds:
-            return False
-
-        with open(CONFIG_PATH) as f:
-            current = json.load(f)
-
-        # Keep system outbounds: §hide§ tag or fundamental types
-        system_obs = [
-            ob for ob in current.get("outbounds", [])
-            if "§hide§" in ob.get("tag", "")
-            or ob.get("type") in ("direct", "block", "dns")
-        ]
-
-        proxy_tags = [ob["tag"] for ob in profile_outbounds]
-        new_selector = {
-            "type": "selector",
-            "tag": "select",
-            "outbounds": proxy_tags,
-            "default": proxy_tags[0],
-            "interrupt_exist_connections": True,
+    def _rebuild_config(self, profile_id: str) -> dict:
+        """Regenerate current-config.json from the selected profile via HiddifyCli."""
+        result = {
+            "success": False,
+            "method": "hiddifycli.build",
+            "profile_id": profile_id,
         }
-        current["outbounds"] = [new_selector] + profile_outbounds + system_obs
+        profile_config_path = os.path.join(CONFIGS_DIR, f"{profile_id}.json")
+        result["profile_config_path"] = profile_config_path
 
-        with open(CONFIG_PATH, "w") as f:
-            json.dump(current, f, ensure_ascii=False, indent=2)
+        if not os.path.exists(profile_config_path):
+            error = f"Profile config not found: {profile_config_path}"
+            decky.logger.error(error)
+            result["error"] = error
+            return result
 
-        return True
+        temp_output_path = f"{CONFIG_PATH}.rebuilt.tmp"
+        result["temp_output_path"] = temp_output_path
+        try:
+            with open(profile_config_path) as f:
+                profile_data = json.load(f)
+            result["profile_summary"] = {
+                "outbounds_count": len(profile_data.get("outbounds", [])),
+                "endpoints_count": len(profile_data.get("endpoints", [])),
+                "top_level_keys": sorted(profile_data.keys()),
+            }
+        except Exception as e:
+            error = f"Failed to parse profile config: {e}"
+            decky.logger.error(error)
+            result["error"] = error
+            return result
+
+        try:
+            os.remove(temp_output_path)
+        except FileNotFoundError:
+            pass
+
+        cmd = [
+            CLI_PATH,
+            "build",
+            "-c", profile_config_path,
+            "--tun",
+            "--full-config",
+            "-o", temp_output_path,
+        ]
+        result["command"] = cmd
+        build = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            cwd=APP_DIR,
+        )
+        result["returncode"] = build.returncode
+        result["stdout_tail"] = (build.stdout or "").strip()[-800:]
+        result["stderr_tail"] = (build.stderr or "").strip()[-800:]
+        if build.returncode != 0:
+            error = f"HiddifyCli build failed with rc={build.returncode}"
+            decky.logger.error(f"{error}: {(build.stderr or build.stdout).strip()[-400:]}")
+            result["error"] = error
+            return result
+
+        if not os.path.exists(temp_output_path):
+            error = f"Built config missing: {temp_output_path}"
+            decky.logger.error(error)
+            result["error"] = error
+            return result
+
+        try:
+            with open(temp_output_path) as f:
+                rebuilt = json.load(f)
+        except Exception as e:
+            error = f"Failed to parse built config: {e}"
+            decky.logger.error(error)
+            result["error"] = error
+            return result
+
+        if not rebuilt.get("outbounds"):
+            error = "Built config has no outbounds"
+            decky.logger.error(error)
+            result["error"] = error
+            return result
+
+        result["rebuilt_summary"] = {
+            "outbounds_count": len(rebuilt.get("outbounds", [])),
+            "has_dns": "dns" in rebuilt,
+            "has_route": "route" in rebuilt,
+            "tun_inbounds": [
+                inbound.get("type")
+                for inbound in rebuilt.get("inbounds", [])
+                if inbound.get("type") == "tun"
+            ],
+        }
+
+        os.replace(temp_output_path, CONFIG_PATH)
+        result["success"] = True
+        return result
 
     def _sync_active_profile_config(self) -> dict:
         active = self._get_active_profile()
@@ -431,7 +487,9 @@ class Plugin:
             return result
 
         result["attempted"] = True
-        result["success"] = self._rebuild_config(active["id"])
+        rebuild = self._rebuild_config(active["id"])
+        result["success"] = rebuild.get("success", False)
+        result["rebuild"] = rebuild
         return result
 
     # ── Plugin API: status ─────────────────────────────────────────────────────
@@ -447,7 +505,8 @@ class Plugin:
 
     async def get_status(self) -> dict:
         tun_up  = self._is_tun_up()
-        running = self._process_running()
+        service = self._service_snapshot()
+        running = self._service_is_active(service) or self._is_grpc_up()
         state, _ = self._get_install_state()
         active = self._get_active_profile()
         return {
@@ -465,19 +524,25 @@ class Plugin:
         return self._read_profiles()
 
     async def switch_profile(self, profile_id: str) -> dict:
+        service = self._service_snapshot()
+        grpc_up = self._is_grpc_up()
+        tun_exists = self._tun_exists()
         self._debug_event(
             "switch_profile.entry",
             profile_id=profile_id,
             tun_up=self._is_tun_up(),
-            service=self._service_snapshot(),
+            tun_exists=tun_exists,
+            grpc_up=grpc_up,
+            service=service,
             config=self._config_summary(),
         )
-        if self._is_tun_up() or self._process_running():
+        if self._is_tun_up() or tun_exists or grpc_up or self._service_is_active(service):
             self._debug_event("switch_profile.blocked_running", profile_id=profile_id)
             return {"success": False, "message": "Stop VPN before switching profile"}
         try:
-            if not self._rebuild_config(profile_id):
-                self._debug_event("switch_profile.rebuild_failed", profile_id=profile_id)
+            rebuild = self._rebuild_config(profile_id)
+            if not rebuild.get("success", False):
+                self._debug_event("switch_profile.rebuild_failed", profile_id=profile_id, rebuild=rebuild)
                 return {"success": False, "message": "Failed to rebuild config"}
 
             db = sqlite3.connect(PROFILES_DB)
@@ -493,6 +558,7 @@ class Plugin:
                 "switch_profile.done",
                 profile_id=profile_id,
                 profile_name=name,
+                rebuild=rebuild,
                 config=self._config_summary(),
             )
             return {"success": True, "message": f"Profile: {name}"}
@@ -557,6 +623,39 @@ class Plugin:
     def _service_is_active(service: dict) -> bool:
         return service.get("active") in ("active", "activating")
 
+    async def _reset_stale_runtime(self) -> dict:
+        result = {
+            "service_before": self._service_snapshot(),
+            "grpc_up_before": self._is_grpc_up(),
+            "tun_exists_before": self._tun_exists(),
+            "tun_up_before": self._is_tun_up(),
+        }
+
+        service = result["service_before"]
+        if self._service_is_active(service):
+            self._systemctl_user(["stop", "hiddify"])
+            await asyncio.sleep(2)
+            service = self._service_snapshot()
+            result["service_after_stop"] = service
+            if self._service_is_active(service):
+                self._systemctl_user(["kill", "-s", "KILL", "hiddify"])
+                await asyncio.sleep(1)
+                self._systemctl_user(["stop", "hiddify"])
+                await asyncio.sleep(2)
+                service = self._service_snapshot()
+                result["service_after_kill"] = service
+
+        cleanup = {}
+        if self._tun_exists() or self._is_tun_up():
+            cleanup = self._cleanup_tun()
+
+        result["cleanup"] = cleanup
+        result["service_after"] = self._service_snapshot()
+        result["grpc_up_after"] = self._is_grpc_up()
+        result["tun_exists_after"] = self._tun_exists()
+        result["tun_up_after"] = self._is_tun_up()
+        return result
+
     async def start_vpn(self) -> dict:
         decky.logger.info("start_vpn called")
         self._user_stopped = False
@@ -571,6 +670,7 @@ class Plugin:
         self._debug_event(
             "start_vpn.entry",
             tun_up=False,
+            tun_exists=self._tun_exists(),
             grpc_up=grpc_up,
             install_state=state,
             config=self._config_summary(),
@@ -595,25 +695,28 @@ class Plugin:
         if not self._check_caps():
             self._apply_caps()
 
-        # Managed user service is the most reliable start path on Steam Deck.
-        # If it is already alive but tun0 is down, restart it instead of trying
-        # Core.Start over the lingering gRPC socket.
         service = self._service_snapshot()
-        managed_service_active = self._service_is_active(service)
-        if managed_service_active:
-            systemctl_action = "restart"
-            decky.logger.info("Managed hiddify.service active — restarting via systemctl --user")
-            self._debug_event("start_vpn.systemctl_restart_branch", grpc_up=grpc_up, service=service)
-        else:
-            systemctl_action = "start"
-            decky.logger.info("Managed hiddify.service inactive — starting via systemctl --user")
-            self._debug_event("start_vpn.systemctl_branch", grpc_up=grpc_up, service=service)
+        if self._service_is_active(service) or self._tun_exists():
+            cleanup = await self._reset_stale_runtime()
+            self._debug_event("start_vpn.pre_start_cleanup", cleanup=cleanup)
+            service = self._service_snapshot()
+            if self._service_is_active(service) or self._tun_exists():
+                self._debug_event(
+                    "start_vpn.pre_start_cleanup_incomplete",
+                    service=service,
+                    tun_exists=self._tun_exists(),
+                    grpc_up=self._is_grpc_up(),
+                )
+                return {"success": False, "message": "Previous VPN session is stuck. Open Logs for diagnostics."}
 
-        r = self._systemctl_user([systemctl_action, "hiddify"])
+        decky.logger.info("Managed hiddify.service inactive — starting via systemctl --user")
+        self._debug_event("start_vpn.systemctl_branch", grpc_up=grpc_up, service=self._service_snapshot())
+
+        r = self._systemctl_user(["start", "hiddify"])
         if r.returncode != 0:
-            decky.logger.error(f"systemctl {systemctl_action} failed: {r.stderr.strip()}")
+            decky.logger.error(f"systemctl start failed: {r.stderr.strip()}")
             self._debug_event(
-                f"start_vpn.systemctl_{systemctl_action}_failed",
+                "start_vpn.systemctl_start_failed",
                 rc=r.returncode,
                 stdout=(r.stdout or "").strip()[-800:],
                 stderr=(r.stderr or "").strip()[-800:],
@@ -652,11 +755,13 @@ class Plugin:
                 )
                 break
 
+        rollback = await self._reset_stale_runtime()
         self._debug_event(
             "start_vpn.systemctl_timeout",
             service=self._service_snapshot(),
             journal=self._journal_user(80),
             config=self._config_summary(),
+            rollback=rollback,
         )
         return {"success": False, "message": "VPN did not start. Open Logs for diagnostics."}
 
