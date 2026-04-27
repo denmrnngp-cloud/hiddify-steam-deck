@@ -3,6 +3,7 @@ import asyncio
 import subprocess
 import os
 import json
+import copy
 import stat
 import socket
 import struct
@@ -27,6 +28,7 @@ DEBUG_LOG_PATH = f"{APP_DIR}/decky-debug.log"
 
 GRPC_PORT = 17078  # GUI in-process gRPC port
 SYSTEMD_START_TIMEOUT = 30
+CORE_GENERATED_TAGS = {"auto", "balance", "lowest"}
 
 PLUGIN_VERSION = "unknown"
 try:
@@ -287,40 +289,7 @@ class Plugin:
         try:
             with open(CONFIG_PATH) as f:
                 data = json.load(f)
-            outbound_tags_list = [
-                item.get("tag")
-                for item in data.get("outbounds", [])
-                if isinstance(item, dict) and item.get("tag")
-            ]
-            endpoint_tags_list = [
-                item.get("tag")
-                for item in data.get("endpoints", [])
-                if isinstance(item, dict) and item.get("tag")
-            ]
-            outbound_tags = {
-                item.get("tag")
-                for item in data.get("outbounds", [])
-                if isinstance(item, dict) and item.get("tag")
-            }
-            endpoint_tags = {
-                item.get("tag")
-                for item in data.get("endpoints", [])
-                if isinstance(item, dict) and item.get("tag")
-            }
-            summary.update({
-                "outbounds_count": len(data.get("outbounds", [])),
-                "endpoints_count": len(data.get("endpoints", [])),
-                "duplicate_outbound_tags": self._duplicate_tags(outbound_tags_list),
-                "duplicate_endpoint_tags": self._duplicate_tags(endpoint_tags_list),
-                "duplicate_outbound_endpoint_tags": sorted(outbound_tags & endpoint_tags),
-                "has_dns": "dns" in data,
-                "has_route": "route" in data,
-                "tun_inbounds": [
-                    inbound.get("type")
-                    for inbound in data.get("inbounds", [])
-                    if inbound.get("type") == "tun"
-                ],
-            })
+            summary.update(self._config_data_summary(data))
         except Exception as e:
             summary["config_error"] = str(e)
         return summary
@@ -412,6 +381,159 @@ class Plugin:
             counts[tag] = counts.get(tag, 0) + 1
         return sorted(tag for tag, count in counts.items() if count > 1)
 
+    def _config_data_summary(self, data: dict) -> dict:
+        outbound_tags_list = [
+            item.get("tag")
+            for item in data.get("outbounds", [])
+            if isinstance(item, dict) and item.get("tag")
+        ]
+        endpoint_tags_list = [
+            item.get("tag")
+            for item in data.get("endpoints", [])
+            if isinstance(item, dict) and item.get("tag")
+        ]
+        outbound_tags = set(outbound_tags_list)
+        endpoint_tags = set(endpoint_tags_list)
+        return {
+            "outbounds_count": len(data.get("outbounds", [])),
+            "endpoints_count": len(data.get("endpoints", [])),
+            "duplicate_outbound_tags": self._duplicate_tags(outbound_tags_list),
+            "duplicate_endpoint_tags": self._duplicate_tags(endpoint_tags_list),
+            "duplicate_outbound_endpoint_tags": sorted(outbound_tags & endpoint_tags),
+            "reserved_outbound_tags": sorted(outbound_tags & CORE_GENERATED_TAGS),
+            "reserved_endpoint_tags": sorted(endpoint_tags & CORE_GENERATED_TAGS),
+            "has_dns": "dns" in data,
+            "has_route": "route" in data,
+            "top_level_keys": sorted(data.keys()),
+            "tun_inbounds": [
+                inbound.get("type")
+                for inbound in data.get("inbounds", [])
+                if isinstance(inbound, dict) and inbound.get("type") == "tun"
+            ],
+        }
+
+    def _rewrite_profile_tag_references(self, config: dict, rename_map: dict[str, str]) -> int:
+        """Rewrite common sing-box tag reference fields after profile tag renames."""
+        if not rename_map:
+            return 0
+
+        rewritten = 0
+        list_reference_keys = {"outbounds"}
+        string_reference_keys = {
+            "default",
+            "detour",
+            "download_detour",
+            "final",
+            "interrupt_exist_connections",
+            "outbound",
+            "upload_detour",
+        }
+
+        def walk(node):
+            nonlocal rewritten
+            if isinstance(node, dict):
+                for key, value in list(node.items()):
+                    if key in list_reference_keys and isinstance(value, list):
+                        new_values = []
+                        changed = False
+                        for item in value:
+                            if isinstance(item, str) and item in rename_map:
+                                new_values.append(rename_map[item])
+                                rewritten += 1
+                                changed = True
+                            else:
+                                new_values.append(item)
+                        if changed:
+                            node[key] = new_values
+                        for item in new_values:
+                            walk(item)
+                    elif key in string_reference_keys and isinstance(value, str) and value in rename_map:
+                        node[key] = rename_map[value]
+                        rewritten += 1
+                    else:
+                        walk(value)
+            elif isinstance(node, list):
+                for item in node:
+                    walk(item)
+
+        walk(config)
+        return rewritten
+
+    def _normalize_reserved_profile_tags(self, config: dict) -> dict:
+        """Rename profile tags that HiddifyCli generates again during `run --tun`."""
+        result = {
+            "renamed": [],
+            "renamed_outbounds": [],
+            "renamed_endpoints": [],
+            "reference_rewrites": 0,
+            "reserved_outbound_tags_before": [],
+            "reserved_outbound_tags_after": [],
+            "reserved_endpoint_tags_before": [],
+            "reserved_endpoint_tags_after": [],
+        }
+        outbounds = config.get("outbounds", [])
+        endpoints = config.get("endpoints", [])
+        if not isinstance(outbounds, list) or not isinstance(endpoints, list):
+            return result
+
+        outbound_tags = [
+            item.get("tag")
+            for item in outbounds
+            if isinstance(item, dict) and item.get("tag")
+        ]
+        endpoint_tags = [
+            item.get("tag")
+            for item in endpoints
+            if isinstance(item, dict) and item.get("tag")
+        ]
+        result["reserved_outbound_tags_before"] = sorted(set(outbound_tags) & CORE_GENERATED_TAGS)
+        result["reserved_endpoint_tags_before"] = sorted(set(endpoint_tags) & CORE_GENERATED_TAGS)
+
+        used_tags = set(outbound_tags) | set(endpoint_tags)
+        rename_map = {}
+
+        for outbound in outbounds:
+            if not isinstance(outbound, dict):
+                continue
+            old_tag = outbound.get("tag")
+            if old_tag not in CORE_GENERATED_TAGS:
+                continue
+            new_tag = self._unique_tag(f"{old_tag}-outbound", used_tags)
+            outbound["tag"] = new_tag
+            rename_map.setdefault(old_tag, new_tag)
+            entry = {"kind": "outbound", "old": old_tag, "new": new_tag, "reason": "reserved-core-tag"}
+            result["renamed"].append(entry)
+            result["renamed_outbounds"].append(entry)
+
+        for endpoint in endpoints:
+            if not isinstance(endpoint, dict):
+                continue
+            old_tag = endpoint.get("tag")
+            if old_tag not in CORE_GENERATED_TAGS:
+                continue
+            new_tag = self._unique_tag(f"{old_tag}-endpoint", used_tags)
+            endpoint["tag"] = new_tag
+            rename_map.setdefault(old_tag, new_tag)
+            entry = {"kind": "endpoint", "old": old_tag, "new": new_tag, "reason": "reserved-core-tag"}
+            result["renamed"].append(entry)
+            result["renamed_endpoints"].append(entry)
+
+        result["reference_rewrites"] = self._rewrite_profile_tag_references(config, rename_map)
+
+        new_outbound_tags = {
+            item.get("tag")
+            for item in outbounds
+            if isinstance(item, dict) and item.get("tag")
+        }
+        new_endpoint_tags = {
+            item.get("tag")
+            for item in endpoints
+            if isinstance(item, dict) and item.get("tag")
+        }
+        result["reserved_outbound_tags_after"] = sorted(new_outbound_tags & CORE_GENERATED_TAGS)
+        result["reserved_endpoint_tags_after"] = sorted(new_endpoint_tags & CORE_GENERATED_TAGS)
+        return result
+
     def _normalize_tag_collisions(self, config: dict) -> dict:
         """Fix HiddifyCli build output where generated tags collide with profile tags."""
         result = {
@@ -493,7 +615,7 @@ class Plugin:
             result["duplicate_endpoint_tags_after"] = self._duplicate_tags(endpoint_tag_list)
             return result
 
-        generated_group_tags = {"lowest", "auto", "balance"}
+        generated_group_tags = CORE_GENERATED_TAGS
 
         def rewrite_outbound_list(values, parent_tag):
             if not isinstance(values, list):
@@ -569,13 +691,40 @@ class Plugin:
         try:
             with open(profile_config_path) as f:
                 profile_data = json.load(f)
-            result["profile_summary"] = {
-                "outbounds_count": len(profile_data.get("outbounds", [])),
-                "endpoints_count": len(profile_data.get("endpoints", [])),
-                "top_level_keys": sorted(profile_data.keys()),
-            }
+            result["profile_summary"] = self._config_data_summary(profile_data)
         except Exception as e:
             error = f"Failed to parse profile config: {e}"
+            decky.logger.error(error)
+            result["error"] = error
+            return result
+
+        service_config = copy.deepcopy(profile_data)
+        reserved_normalization = self._normalize_reserved_profile_tags(service_config)
+        service_tag_normalization = self._normalize_tag_collisions(service_config)
+        result["reserved_profile_tag_normalization"] = reserved_normalization
+        result["service_tag_normalization"] = service_tag_normalization
+        result["service_input_summary"] = self._config_data_summary(service_config)
+
+        service_input_problems = {
+            "reserved_outbound": result["service_input_summary"].get("reserved_outbound_tags", []),
+            "reserved_endpoint": result["service_input_summary"].get("reserved_endpoint_tags", []),
+            "duplicate_outbound": result["service_input_summary"].get("duplicate_outbound_tags", []),
+            "duplicate_endpoint": result["service_input_summary"].get("duplicate_endpoint_tags", []),
+            "duplicate_outbound_endpoint": result["service_input_summary"].get("duplicate_outbound_endpoint_tags", []),
+        }
+        if any(service_input_problems.values()):
+            error = f"Service input config still has unsafe tags: {service_input_problems}"
+            decky.logger.error(error)
+            result["error"] = error
+            return result
+
+        sanitized_input_path = f"{CONFIG_PATH}.service-input.tmp"
+        result["sanitized_input_path"] = sanitized_input_path
+        try:
+            with open(sanitized_input_path, "w") as f:
+                json.dump(service_config, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            error = f"Failed to write service input config: {e}"
             decky.logger.error(error)
             result["error"] = error
             return result
@@ -588,7 +737,7 @@ class Plugin:
         cmd = [
             CLI_PATH,
             "build",
-            "-c", profile_config_path,
+            "-c", sanitized_input_path,
             "--tun",
             "--full-config",
             "-o", temp_output_path,
@@ -631,7 +780,7 @@ class Plugin:
             return result
 
         tag_normalization = self._normalize_tag_collisions(rebuilt)
-        result["tag_normalization"] = tag_normalization
+        result["validation_tag_normalization"] = tag_normalization
         duplicate_tags_after = {
             "outbound": tag_normalization.get("duplicate_outbound_tags_after", []),
             "endpoint": tag_normalization.get("duplicate_endpoint_tags_after", []),
@@ -643,19 +792,14 @@ class Plugin:
             result["error"] = error
             return result
 
-        result["rebuilt_summary"] = {
-            "outbounds_count": len(rebuilt.get("outbounds", [])),
-            "endpoints_count": len(rebuilt.get("endpoints", [])),
-            "has_dns": "dns" in rebuilt,
-            "has_route": "route" in rebuilt,
-            "tun_inbounds": [
-                inbound.get("type")
-                for inbound in rebuilt.get("inbounds", [])
-                if inbound.get("type") == "tun"
-            ],
-        }
+        result["rebuilt_summary"] = self._config_data_summary(rebuilt)
+        result["write_mode"] = "sanitized_profile_for_hiddifycli_run"
 
-        os.replace(temp_output_path, CONFIG_PATH)
+        os.replace(sanitized_input_path, CONFIG_PATH)
+        try:
+            os.remove(temp_output_path)
+        except FileNotFoundError:
+            pass
         result["success"] = True
         return result
 
@@ -673,7 +817,7 @@ class Plugin:
 
         profile_config_path = os.path.join(CONFIGS_DIR, f"{active['id']}.json")
         result["profile_config_exists"] = os.path.exists(profile_config_path)
-        if not result["profile_config_exists"] or not os.path.exists(CONFIG_PATH):
+        if not result["profile_config_exists"]:
             return result
 
         result["attempted"] = True
