@@ -287,6 +287,16 @@ class Plugin:
         try:
             with open(CONFIG_PATH) as f:
                 data = json.load(f)
+            outbound_tags_list = [
+                item.get("tag")
+                for item in data.get("outbounds", [])
+                if isinstance(item, dict) and item.get("tag")
+            ]
+            endpoint_tags_list = [
+                item.get("tag")
+                for item in data.get("endpoints", [])
+                if isinstance(item, dict) and item.get("tag")
+            ]
             outbound_tags = {
                 item.get("tag")
                 for item in data.get("outbounds", [])
@@ -300,6 +310,8 @@ class Plugin:
             summary.update({
                 "outbounds_count": len(data.get("outbounds", [])),
                 "endpoints_count": len(data.get("endpoints", [])),
+                "duplicate_outbound_tags": self._duplicate_tags(outbound_tags_list),
+                "duplicate_endpoint_tags": self._duplicate_tags(endpoint_tags_list),
                 "duplicate_outbound_endpoint_tags": sorted(outbound_tags & endpoint_tags),
                 "has_dns": "dns" in data,
                 "has_route": "route" in data,
@@ -393,49 +405,92 @@ class Plugin:
         used_tags.add(candidate)
         return candidate
 
-    def _normalize_endpoint_tag_collisions(self, config: dict) -> dict:
-        """Fix HiddifyCli build output where generated outbounds collide with endpoint tags."""
+    @staticmethod
+    def _duplicate_tags(tags: list[str]) -> list[str]:
+        counts = {}
+        for tag in tags:
+            counts[tag] = counts.get(tag, 0) + 1
+        return sorted(tag for tag, count in counts.items() if count > 1)
+
+    def _normalize_tag_collisions(self, config: dict) -> dict:
+        """Fix HiddifyCli build output where generated tags collide with profile tags."""
         result = {
             "renamed": [],
+            "renamed_outbounds": [],
+            "renamed_endpoints": [],
             "reference_rewrites": 0,
             "duplicate_tags_before": [],
             "duplicate_tags_after": [],
+            "duplicate_outbound_tags_before": [],
+            "duplicate_outbound_tags_after": [],
+            "duplicate_endpoint_tags_before": [],
+            "duplicate_endpoint_tags_after": [],
         }
         outbounds = config.get("outbounds", [])
         endpoints = config.get("endpoints", [])
         if not isinstance(outbounds, list) or not isinstance(endpoints, list):
             return result
 
-        outbound_tags = {
+        outbound_tag_list = [
             item.get("tag")
             for item in outbounds
             if isinstance(item, dict) and item.get("tag")
-        }
-        endpoint_tags = [
+        ]
+        endpoint_tag_list = [
             item.get("tag")
             for item in endpoints
             if isinstance(item, dict) and item.get("tag")
         ]
-        result["duplicate_tags_before"] = sorted(outbound_tags & set(endpoint_tags))
+        result["duplicate_outbound_tags_before"] = self._duplicate_tags(outbound_tag_list)
+        result["duplicate_endpoint_tags_before"] = self._duplicate_tags(endpoint_tag_list)
+        result["duplicate_tags_before"] = sorted(set(outbound_tag_list) & set(endpoint_tag_list))
 
-        used_tags = set(outbound_tags) | set(endpoint_tags)
-        seen_endpoint_tags = set()
+        used_tags = set(outbound_tag_list) | set(endpoint_tag_list)
         rename_map = {}
+
+        seen_outbound_tags = set()
+        for outbound in outbounds:
+            if not isinstance(outbound, dict):
+                continue
+            old_tag = outbound.get("tag")
+            if not old_tag:
+                continue
+            if old_tag in seen_outbound_tags:
+                new_tag = self._unique_tag(f"{old_tag}-outbound", used_tags)
+                outbound["tag"] = new_tag
+                rename_map.setdefault(old_tag, new_tag)
+                entry = {"kind": "outbound", "old": old_tag, "new": new_tag}
+                result["renamed"].append(entry)
+                result["renamed_outbounds"].append(entry)
+            else:
+                seen_outbound_tags.add(old_tag)
+
+        outbound_tags_after = {
+            item.get("tag")
+            for item in outbounds
+            if isinstance(item, dict) and item.get("tag")
+        }
+
+        seen_endpoint_tags = set()
         for endpoint in endpoints:
             if not isinstance(endpoint, dict):
                 continue
             old_tag = endpoint.get("tag")
             if not old_tag:
                 continue
-            if old_tag in outbound_tags or old_tag in seen_endpoint_tags:
+            if old_tag in outbound_tags_after or old_tag in seen_endpoint_tags:
                 new_tag = self._unique_tag(f"{old_tag}-endpoint", used_tags)
                 endpoint["tag"] = new_tag
                 rename_map.setdefault(old_tag, new_tag)
-                result["renamed"].append({"old": old_tag, "new": new_tag})
+                entry = {"kind": "endpoint", "old": old_tag, "new": new_tag}
+                result["renamed"].append(entry)
+                result["renamed_endpoints"].append(entry)
             else:
                 seen_endpoint_tags.add(old_tag)
 
         if not rename_map:
+            result["duplicate_outbound_tags_after"] = self._duplicate_tags(outbound_tag_list)
+            result["duplicate_endpoint_tags_after"] = self._duplicate_tags(endpoint_tag_list)
             return result
 
         generated_group_tags = {"lowest", "auto", "balance"}
@@ -448,7 +503,7 @@ class Plugin:
                 occurrences = [i for i, value in enumerate(rewritten) if value == old_tag]
                 if not occurrences:
                     continue
-                if parent_tag == old_tag or parent_tag in generated_group_tags or old_tag not in outbound_tags:
+                if parent_tag == old_tag or parent_tag in generated_group_tags or old_tag not in outbound_tags_after:
                     indexes_to_rewrite = occurrences
                 elif len(occurrences) > 1:
                     indexes_to_rewrite = occurrences[1:]
@@ -478,7 +533,19 @@ class Plugin:
             for item in endpoints
             if isinstance(item, dict) and item.get("tag")
         }
-        result["duplicate_tags_after"] = sorted(outbound_tags & new_endpoint_tags)
+        new_outbound_tag_list = [
+            item.get("tag")
+            for item in outbounds
+            if isinstance(item, dict) and item.get("tag")
+        ]
+        new_endpoint_tag_list = [
+            item.get("tag")
+            for item in endpoints
+            if isinstance(item, dict) and item.get("tag")
+        ]
+        result["duplicate_outbound_tags_after"] = self._duplicate_tags(new_outbound_tag_list)
+        result["duplicate_endpoint_tags_after"] = self._duplicate_tags(new_endpoint_tag_list)
+        result["duplicate_tags_after"] = sorted(set(new_outbound_tag_list) & new_endpoint_tags)
         return result
 
     def _rebuild_config(self, profile_id: str) -> dict:
@@ -563,10 +630,15 @@ class Plugin:
             result["error"] = error
             return result
 
-        tag_normalization = self._normalize_endpoint_tag_collisions(rebuilt)
+        tag_normalization = self._normalize_tag_collisions(rebuilt)
         result["tag_normalization"] = tag_normalization
-        if tag_normalization.get("duplicate_tags_after"):
-            error = f"Built config still has duplicate outbound/endpoint tags: {tag_normalization['duplicate_tags_after']}"
+        duplicate_tags_after = {
+            "outbound": tag_normalization.get("duplicate_outbound_tags_after", []),
+            "endpoint": tag_normalization.get("duplicate_endpoint_tags_after", []),
+            "outbound_endpoint": tag_normalization.get("duplicate_tags_after", []),
+        }
+        if any(duplicate_tags_after.values()):
+            error = f"Built config still has duplicate tags: {duplicate_tags_after}"
             decky.logger.error(error)
             result["error"] = error
             return result
