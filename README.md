@@ -24,11 +24,23 @@ This test build adds Game Mode server selection for multi-server VPN profiles an
 
 ## Demo
 
+### Installer and basic VPN toggle
+
 <a href="https://github.com/denmrnngp-cloud/hiddify-steam-deck/releases/download/v1.2.0/demo.mp4">
   <img src="https://raw.githubusercontent.com/denmrnngp-cloud/hiddify-steam-deck/main/assets/demo.gif" alt="Demo — Hiddify VPN installer and VPN toggle in Desktop and Game Mode" width="100%"/>
 </a>
 
 ▶ [Download / watch full demo (mp4)](https://github.com/denmrnngp-cloud/hiddify-steam-deck/releases/download/v1.2.0/demo.mp4)
+
+### Game Mode profiles and server selection
+
+<a href="https://raw.githubusercontent.com/denmrnngp-cloud/hiddify-steam-deck/main/assets/game-mode-profiles-demo.mp4">
+  <img src="https://raw.githubusercontent.com/denmrnngp-cloud/hiddify-steam-deck/main/assets/game-mode-profiles-demo.gif" alt="Demo — Hiddify VPN Decky plugin profile and server selection in Game Mode" width="100%"/>
+</a>
+
+This demo shows the Decky plugin in Game Mode with both single-server and multi-server profiles. The server selector appears only for profiles where server choice is available.
+
+▶ [Download / watch Game Mode profile and server selection demo (mp4)](https://raw.githubusercontent.com/denmrnngp-cloud/hiddify-steam-deck/main/assets/game-mode-profiles-demo.mp4)
 
 ---
 
