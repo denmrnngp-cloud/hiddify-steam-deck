@@ -46,7 +46,8 @@ for archive in \
     "$ROOT_DIR/release/installer-src/decky-hiddify.zip" \
     "$ROOT_DIR/release/decky-hiddify-v${VERSION}.zip"
 do
-    if ! unzip -Z1 "$archive" | grep -qx 'decky-hiddify/package.json'; then
+    entries="$(unzip -Z1 "$archive")"
+    if ! grep -qx 'decky-hiddify/package.json' <<< "$entries"; then
         echo "package.json missing in $archive" >&2
         exit 1
     fi

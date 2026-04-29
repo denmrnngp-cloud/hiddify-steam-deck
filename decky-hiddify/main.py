@@ -54,6 +54,14 @@ except Exception:
     pass
 
 
+def _compact_process_result(result: subprocess.CompletedProcess) -> dict:
+    return {
+        "rc": result.returncode,
+        "stdout": (result.stdout or "").strip()[-500:],
+        "stderr": (result.stderr or "").strip()[-500:],
+    }
+
+
 class Plugin:
     _monitor_task = None
     _user_stopped  = False  # set True when user explicitly stops VPN via plugin
@@ -513,7 +521,7 @@ WantedBy=default.target
                 except Exception:
                     pass
             self._systemctl_user(["daemon-reload"])
-            self._systemctl_user(["enable", "hiddify"])
+            result["autostart"] = self._disable_user_service_autostart()
             result["success"] = True
         except Exception as e:
             result["error"] = str(e)
@@ -1401,6 +1409,22 @@ WantedBy=default.target
             capture_output=True, text=True, env=env,
         )
 
+    def _disable_user_service_autostart(self) -> dict:
+        """Keep the service available for manual start, but remove boot autostart."""
+        try:
+            before = self._systemctl_user(["is-enabled", "hiddify"])
+            disable = self._systemctl_user(["disable", "hiddify"])
+            after = self._systemctl_user(["is-enabled", "hiddify"])
+            after_state = (after.stdout or after.stderr).strip()
+            return {
+                "before": (before.stdout or before.stderr).strip(),
+                "disable": _compact_process_result(disable),
+                "after": after_state,
+                "success": after_state != "enabled",
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     def _journal_user(self, lines: int = 60) -> str:
         env = os.environ.copy()
         env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/run/user/1000/bus"
@@ -1582,12 +1606,14 @@ WantedBy=default.target
         decky.logger.info("stop_vpn called")
         self._user_stopped = True
         service = self._service_snapshot()
+        autostart = self._disable_user_service_autostart()
         self._debug_event(
             "stop_vpn.entry",
             tun_up=self._is_tun_up(),
             tun_exists=self._tun_exists(),
             grpc_up=self._is_grpc_up(),
             service=service,
+            autostart=autostart,
         )
         try:
             # If the managed user service is active, stop it first.
@@ -1610,6 +1636,7 @@ WantedBy=default.target
                 await asyncio.sleep(3)
                 if not self._is_tun_up():
                     decky.logger.info("VPN stopped via gRPC")
+                    self._debug_event("stop_vpn.done", tun_up=False, tun_exists=self._tun_exists(), autostart=autostart, service=self._service_snapshot())
                     return {"success": True, "message": "VPN stopped"}
                 decky.logger.warning("gRPC Stop sent but tun0 still up — falling back to systemctl")
 
@@ -1619,13 +1646,13 @@ WantedBy=default.target
                     cleanup = self._cleanup_tun()
                 service = self._service_snapshot()
                 if self._service_is_active(service):
-                    self._debug_event("stop_vpn.service_still_active", tun_up=False, tun_exists=self._tun_exists(), cleanup=cleanup, service=service)
+                    self._debug_event("stop_vpn.service_still_active", tun_up=False, tun_exists=self._tun_exists(), cleanup=cleanup, autostart=autostart, service=service)
                     return {"success": False, "message": "VPN service is still active. Open Logs for diagnostics."}
                 if self._tun_exists():
-                    self._debug_event("stop_vpn.stale_tun_remaining", tun_up=False, tun_exists=True, cleanup=cleanup, service=service)
+                    self._debug_event("stop_vpn.stale_tun_remaining", tun_up=False, tun_exists=True, cleanup=cleanup, autostart=autostart, service=service)
                     return {"success": False, "message": "VPN interface cleanup failed. Open Logs for diagnostics."}
                 decky.logger.info("VPN stopped via systemctl")
-                self._debug_event("stop_vpn.done", tun_up=False, tun_exists=False, cleanup=cleanup, service=service)
+                self._debug_event("stop_vpn.done", tun_up=False, tun_exists=False, cleanup=cleanup, autostart=autostart, service=service)
                 return {"success": True, "message": "VPN stopped"}
 
             # Last resort: kill any remaining HiddifyCli processes
@@ -1645,13 +1672,13 @@ WantedBy=default.target
             service = self._service_snapshot()
             decky.logger.info(f"stop_vpn done, tun_up={tun_up}")
             tun_exists = self._tun_exists()
-            self._debug_event("stop_vpn.done", tun_up=tun_up, tun_exists=tun_exists, cleanup=cleanup, service=service)
+            self._debug_event("stop_vpn.done", tun_up=tun_up, tun_exists=tun_exists, cleanup=cleanup, autostart=autostart, service=service)
             if tun_up or tun_exists or self._service_is_active(service):
                 return {"success": False, "message": "VPN stop incomplete. Open Logs for diagnostics."}
             return {"success": True, "message": "VPN stopped"}
         except Exception as e:
             decky.logger.error(f"stop_vpn error: {e}")
-            self._debug_event("stop_vpn.error", error=str(e), service=self._service_snapshot(), journal=self._journal_user(60))
+            self._debug_event("stop_vpn.error", error=str(e), autostart=autostart, service=self._service_snapshot(), journal=self._journal_user(60))
             return {"success": False, "message": str(e)}
 
     async def get_logs(self) -> str:

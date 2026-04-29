@@ -422,10 +422,10 @@ EOF
 
     chown deck:deck "$SERVICE_DIR/hiddify.service"
     export XDG_RUNTIME_DIR="/run/user/1000"
-    su -l deck -c "XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus systemctl --user daemon-reload && systemctl --user enable hiddify" 2>/dev/null || true
+    su -l deck -c "XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus systemctl --user daemon-reload && systemctl --user disable hiddify" 2>/dev/null || true
     chown -R deck:deck "$APP_DIR" "$SYSTEM_APP_DIR" 2>/dev/null || true
 
-    ok "User systemd service configured (Steam Deck)"
+    ok "User systemd service configured (Steam Deck, manual start only)"
 else
     # Regular Linux: system service with AmbientCapabilities
     CURRENT_USER="${SUDO_USER:-$(logname 2>/dev/null || echo root)}"
@@ -453,8 +453,8 @@ WantedBy=multi-user.target
 EOF
 
     systemctl daemon-reload
-    systemctl enable hiddify
-    ok "System systemd service configured"
+    systemctl disable hiddify 2>/dev/null || true
+    ok "System systemd service configured (manual start only)"
 fi
 
 # ── [4/6] /dev/net/tun ────────────────────────────────────────────────────────
