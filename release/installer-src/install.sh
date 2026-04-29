@@ -329,6 +329,78 @@ if [ $IS_STEAMDECK -eq 1 ]; then
     fi
     mkdir -p "$SERVICE_DIR"
 
+    HIDDIFY_SETTINGS_PATH="$APP_DIR/data/decky-hiddify-settings.json"
+    cat > "$HIDDIFY_SETTINGS_PATH" << 'JSON'
+{
+  "region": "ru",
+  "balancer-strategy": "round-robin",
+  "block-ads": false,
+  "use-xray-core-when-possible": false,
+  "execute-config-as-is": false,
+  "log-level": "warn",
+  "resolve-destination": false,
+  "ipv6-mode": "ipv4_only",
+  "remote-dns-address": "tcp://8.8.8.8",
+  "remote-dns-domain-strategy": "",
+  "direct-dns-address": "1.1.1.1",
+  "direct-dns-domain-strategy": "",
+  "mixed-port": 12334,
+  "tproxy-port": 12335,
+  "direct-port": 12337,
+  "redirect-port": 12336,
+  "tun-implementation": "gvisor",
+  "mtu": 9000,
+  "strict-route": true,
+  "connection-test-url": "http://captive.apple.com/hotspot-detect.html",
+  "url-test-interval": 600,
+  "enable-clash-api": true,
+  "clash-api-port": 16756,
+  "enable-tun": true,
+  "set-system-proxy": false,
+  "bypass-lan": false,
+  "allow-connection-from-lan": false,
+  "enable-fake-dns": false,
+  "independent-dns-cache": true,
+  "rules": [],
+  "tls-tricks": {
+    "enable-fragment": false,
+    "fragment-size": "10-30",
+    "fragment-sleep": "2-8",
+    "mixed-sni-case": false,
+    "enable-padding": false,
+    "padding-size": "1-1500"
+  },
+  "warp": {
+    "enable": false,
+    "mode": "warp_over_proxy",
+    "wireguard-config": "",
+    "license-key": "",
+    "account-id": "",
+    "access-token": "",
+    "clean-ip": "auto",
+    "clean-port": 0,
+    "noise": "1-3",
+    "noise-size": "10-30",
+    "noise-delay": "10-30",
+    "noise-mode": "m4"
+  },
+  "warp2": {
+    "enable": false,
+    "mode": "warp_over_proxy",
+    "wireguard-config": "",
+    "license-key": "",
+    "account-id": "",
+    "access-token": "",
+    "clean-ip": "auto",
+    "clean-port": 0,
+    "noise": "1-3",
+    "noise-size": "10-30",
+    "noise-delay": "10-30",
+    "noise-mode": "m4"
+  }
+}
+JSON
+
     cat > "$SERVICE_DIR/hiddify.service" << EOF
 [Unit]
 Description=Hiddify VPN Core Service
@@ -340,7 +412,7 @@ Type=simple
 # CWD: cache.db is created here (user-writable); hiddify-core.so is found via absolute RUNPATH
 WorkingDirectory=/home/deck/.local/share/app.hiddify.com
 Environment=HOME=/home/deck USER=deck
-ExecStart=$INSTALL_DIR/HiddifyCli run -c /home/deck/.local/share/app.hiddify.com/data/current-config.json --tun
+ExecStart=$INSTALL_DIR/HiddifyCli run -c /home/deck/.local/share/app.hiddify.com/data/current-config.json --tun -d /home/deck/.local/share/app.hiddify.com/data/decky-hiddify-settings.json
 Restart=on-failure
 RestartSec=5
 

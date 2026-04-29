@@ -25,10 +25,26 @@ PROFILES_DB  = f"{APP_DIR}/db.sqlite"
 CONFIGS_DIR  = f"{APP_DIR}/configs"
 APP_LOG_PATH = f"{APP_DIR}/app.log"
 DEBUG_LOG_PATH = f"{APP_DIR}/decky-debug.log"
+HIDDIFY_SETTINGS_PATH = f"{APP_DIR}/data/decky-hiddify-settings.json"
+SERVER_SELECTION_PATH = f"{APP_DIR}/decky-server-selection.json"
+USER_SERVICE_PATH = "/home/deck/.config/systemd/user/hiddify.service"
 
 GRPC_PORT = 17078  # GUI in-process gRPC port
 SYSTEMD_START_TIMEOUT = 30
-CORE_GENERATED_TAGS = {"auto", "balance", "lowest"}
+CORE_GENERATED_TAGS = {"auto", "balance", "lowest", "select"}
+HIDDEN_OUTBOUND_TYPES = {"selector", "urltest", "balancer", "direct", "block", "dns"}
+HIDDEN_OUTBOUND_TAGS = {
+    "auto",
+    "balance",
+    "block",
+    "bypass",
+    "direct",
+    "dns",
+    "fragment",
+    "lowest",
+    "select",
+    "warp",
+}
 
 PLUGIN_VERSION = "unknown"
 try:
@@ -365,6 +381,371 @@ class Plugin:
         return profiles[0] if profiles else None
 
     @staticmethod
+    def _hiddify_runtime_settings() -> dict:
+        """Settings used by the Decky/systemd path when HiddifyCli builds config."""
+        return {
+            "region": "ru",
+            "balancer-strategy": "round-robin",
+            "block-ads": False,
+            "use-xray-core-when-possible": False,
+            "execute-config-as-is": False,
+            "log-level": "warn",
+            "resolve-destination": False,
+            "ipv6-mode": "ipv4_only",
+            "remote-dns-address": "tcp://8.8.8.8",
+            "remote-dns-domain-strategy": "",
+            "direct-dns-address": "1.1.1.1",
+            "direct-dns-domain-strategy": "",
+            "mixed-port": 12334,
+            "tproxy-port": 12335,
+            "direct-port": 12337,
+            "redirect-port": 12336,
+            "tun-implementation": "gvisor",
+            "mtu": 9000,
+            "strict-route": True,
+            "connection-test-url": "http://captive.apple.com/hotspot-detect.html",
+            "url-test-interval": 600,
+            "enable-clash-api": True,
+            "clash-api-port": 16756,
+            "enable-tun": True,
+            "set-system-proxy": False,
+            "bypass-lan": False,
+            "allow-connection-from-lan": False,
+            "enable-fake-dns": False,
+            "independent-dns-cache": True,
+            "rules": [],
+            "tls-tricks": {
+                "enable-fragment": False,
+                "fragment-size": "10-30",
+                "fragment-sleep": "2-8",
+                "mixed-sni-case": False,
+                "enable-padding": False,
+                "padding-size": "1-1500",
+            },
+            "warp": {
+                "enable": False,
+                "mode": "warp_over_proxy",
+                "wireguard-config": "",
+                "license-key": "",
+                "account-id": "",
+                "access-token": "",
+                "clean-ip": "auto",
+                "clean-port": 0,
+                "noise": "1-3",
+                "noise-size": "10-30",
+                "noise-delay": "10-30",
+                "noise-mode": "m4",
+            },
+            "warp2": {
+                "enable": False,
+                "mode": "warp_over_proxy",
+                "wireguard-config": "",
+                "license-key": "",
+                "account-id": "",
+                "access-token": "",
+                "clean-ip": "auto",
+                "clean-port": 0,
+                "noise": "1-3",
+                "noise-size": "10-30",
+                "noise-delay": "10-30",
+                "noise-mode": "m4",
+            },
+        }
+
+    def _write_hiddify_runtime_settings(self) -> dict:
+        result = {
+            "path": HIDDIFY_SETTINGS_PATH,
+            "success": False,
+            "balancer_strategy": "round-robin",
+        }
+        try:
+            os.makedirs(os.path.dirname(HIDDIFY_SETTINGS_PATH), exist_ok=True)
+            tmp_path = f"{HIDDIFY_SETTINGS_PATH}.tmp"
+            with open(tmp_path, "w") as f:
+                json.dump(self._hiddify_runtime_settings(), f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, HIDDIFY_SETTINGS_PATH)
+            try:
+                os.chown(HIDDIFY_SETTINGS_PATH, 1000, 1000)
+            except Exception:
+                pass
+            result["success"] = True
+        except Exception as e:
+            result["error"] = str(e)
+            decky.logger.error(f"Failed to write Hiddify runtime settings: {e}")
+        return result
+
+    def _ensure_user_service(self) -> dict:
+        result = {
+            "path": USER_SERVICE_PATH,
+            "success": False,
+            "settings_path": HIDDIFY_SETTINGS_PATH,
+        }
+        service_text = f"""[Unit]
+Description=Hiddify VPN Core Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={APP_DIR}
+Environment=HOME=/home/deck USER=deck
+ExecStart={CLI_PATH} run -c {CONFIG_PATH} --tun -d {HIDDIFY_SETTINGS_PATH}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+"""
+        try:
+            os.makedirs(os.path.dirname(USER_SERVICE_PATH), exist_ok=True)
+            current = ""
+            if os.path.exists(USER_SERVICE_PATH):
+                with open(USER_SERVICE_PATH) as f:
+                    current = f.read()
+            result["changed"] = current != service_text
+            if result["changed"]:
+                tmp_path = f"{USER_SERVICE_PATH}.tmp"
+                with open(tmp_path, "w") as f:
+                    f.write(service_text)
+                os.replace(tmp_path, USER_SERVICE_PATH)
+                try:
+                    os.chown(USER_SERVICE_PATH, 1000, 1000)
+                except Exception:
+                    pass
+            self._systemctl_user(["daemon-reload"])
+            self._systemctl_user(["enable", "hiddify"])
+            result["success"] = True
+        except Exception as e:
+            result["error"] = str(e)
+            decky.logger.warning(f"Could not ensure hiddify user service: {e}")
+        return result
+
+    @staticmethod
+    def _display_server_name(tag: str) -> str:
+        return (
+            str(tag or "")
+            .replace("§default§", "")
+            .replace("§hide§", "")
+            .strip()
+            or "Unnamed server"
+        )
+
+    @staticmethod
+    def _is_hidden_outbound(outbound: dict) -> bool:
+        tag = str(outbound.get("tag") or "")
+        outbound_type = str(outbound.get("type") or "").lower()
+        if not tag or "§hide§" in tag:
+            return True
+        return tag in HIDDEN_OUTBOUND_TAGS or outbound_type in HIDDEN_OUTBOUND_TYPES
+
+    def _selectable_servers_from_config(self, config: dict) -> list:
+        servers = []
+        seen_tags = set()
+        for outbound in config.get("outbounds", []):
+            if not isinstance(outbound, dict) or self._is_hidden_outbound(outbound):
+                continue
+            tag = outbound.get("tag")
+            if not tag or tag in seen_tags:
+                continue
+            seen_tags.add(tag)
+            servers.append({
+                "tag": tag,
+                "name": self._display_server_name(tag),
+                "type": str(outbound.get("type") or "unknown"),
+                "server": str(outbound.get("server") or outbound.get("address") or ""),
+                "port": str(outbound.get("server_port") or outbound.get("port") or ""),
+            })
+        return servers
+
+    def _read_server_selection_state(self) -> dict:
+        try:
+            with open(SERVER_SELECTION_PATH) as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except FileNotFoundError:
+            return {}
+        except Exception as e:
+            decky.logger.warning(f"Failed to read server selection state: {e}")
+            return {}
+
+    def _write_server_selection_state(self, state: dict) -> dict:
+        result = {"path": SERVER_SELECTION_PATH, "success": False}
+        try:
+            os.makedirs(os.path.dirname(SERVER_SELECTION_PATH), exist_ok=True)
+            tmp_path = f"{SERVER_SELECTION_PATH}.tmp"
+            with open(tmp_path, "w") as f:
+                json.dump(state, f, ensure_ascii=False, indent=2, sort_keys=True)
+            os.replace(tmp_path, SERVER_SELECTION_PATH)
+            try:
+                os.chown(SERVER_SELECTION_PATH, 1000, 1000)
+            except Exception:
+                pass
+            result["success"] = True
+        except Exception as e:
+            result["error"] = str(e)
+        return result
+
+    def _selected_server_state(self, profile_id: str, servers: list) -> dict:
+        selectable = len(servers) > 1
+        if not selectable:
+            return {
+                "mode": "single",
+                "tag": servers[0]["tag"] if servers else "",
+                "name": servers[0]["name"] if servers else "",
+                "valid": True,
+            }
+
+        state = self._read_server_selection_state().get(profile_id, {})
+        tags = {server["tag"] for server in servers}
+        if state.get("mode") == "manual" and state.get("tag") in tags:
+            tag = state["tag"]
+            server = next((item for item in servers if item["tag"] == tag), None)
+            return {
+                "mode": "manual",
+                "tag": tag,
+                "name": server["name"] if server else self._display_server_name(tag),
+                "valid": True,
+            }
+
+        return {
+            "mode": "auto",
+            "tag": "",
+            "name": "Hiddify default",
+            "valid": True,
+            "fallback_reason": "missing-or-invalid-saved-selection" if state else "",
+        }
+
+    def _normalized_profile_config(self, profile_id: str) -> dict:
+        result = {
+            "success": False,
+            "profile_id": profile_id,
+            "profile_config_path": os.path.join(CONFIGS_DIR, f"{profile_id}.json"),
+        }
+        if not os.path.exists(result["profile_config_path"]):
+            result["error"] = f"Profile config not found: {result['profile_config_path']}"
+            return result
+        try:
+            with open(result["profile_config_path"]) as f:
+                profile_data = json.load(f)
+            service_config = copy.deepcopy(profile_data)
+            result["profile_summary"] = self._config_data_summary(profile_data)
+            result["reserved_profile_tag_normalization"] = self._normalize_reserved_profile_tags(service_config)
+            result["service_tag_normalization"] = self._normalize_tag_collisions(service_config)
+            result["service_config"] = service_config
+            result["service_input_summary"] = self._config_data_summary(service_config)
+            result["success"] = True
+        except Exception as e:
+            result["error"] = str(e)
+        return result
+
+    def _profile_server_info_from_config(self, profile_id: str, config: dict) -> dict:
+        servers = self._selectable_servers_from_config(config)
+        selected = self._selected_server_state(profile_id, servers)
+        return {
+            "profile_id": profile_id,
+            "selectable": len(servers) > 1,
+            "servers": servers,
+            "selected": selected,
+            "count": len(servers),
+        }
+
+    def _profile_server_info(self, profile_id: str) -> dict:
+        normalized = self._normalized_profile_config(profile_id)
+        if not normalized.get("success"):
+            return {
+                "profile_id": profile_id,
+                "selectable": False,
+                "servers": [],
+                "selected": {"mode": "none", "tag": "", "name": "", "valid": False},
+                "count": 0,
+                "error": normalized.get("error", "Failed to read profile config"),
+            }
+        info = self._profile_server_info_from_config(profile_id, normalized["service_config"])
+        info["profile_summary"] = normalized.get("profile_summary", {})
+        info["service_input_summary"] = normalized.get("service_input_summary", {})
+        return info
+
+    @staticmethod
+    def _referenced_outbound_tags(outbound: dict) -> set[str]:
+        refs = set()
+        for key in ("detour", "download_detour", "upload_detour", "outbound"):
+            value = outbound.get(key)
+            if isinstance(value, str) and value:
+                refs.add(value)
+        return refs
+
+    def _filter_config_to_selected_server(self, config: dict, selected_tag: str) -> dict:
+        result = {
+            "mode": "manual",
+            "selected_tag": selected_tag,
+            "success": False,
+            "kept_tags": [],
+        }
+        outbounds = config.get("outbounds", [])
+        if not isinstance(outbounds, list):
+            result["error"] = "outbounds is not a list"
+            return result
+
+        by_tag = {
+            outbound.get("tag"): outbound
+            for outbound in outbounds
+            if isinstance(outbound, dict) and outbound.get("tag")
+        }
+        if selected_tag not in by_tag:
+            result["error"] = f"Selected server is not present in profile: {selected_tag}"
+            return result
+
+        keep = set()
+        queue = [selected_tag]
+        while queue:
+            tag = queue.pop(0)
+            if tag in keep:
+                continue
+            outbound = by_tag.get(tag)
+            if not outbound:
+                continue
+            keep.add(tag)
+            for ref in self._referenced_outbound_tags(outbound):
+                if ref in by_tag and ref not in keep:
+                    queue.append(ref)
+
+        config["outbounds"] = [
+            outbound
+            for outbound in outbounds
+            if isinstance(outbound, dict) and outbound.get("tag") in keep
+        ]
+        result["kept_tags"] = [outbound.get("tag") for outbound in config["outbounds"]]
+        result["success"] = True
+        return result
+
+    def _apply_server_selection(self, profile_id: str, config: dict) -> dict:
+        info = self._profile_server_info_from_config(profile_id, config)
+        result = {
+            "profile_id": profile_id,
+            "selectable": info["selectable"],
+            "server_count": info["count"],
+            "selected": info["selected"],
+            "action": "none",
+            "success": True,
+        }
+        if not info["selectable"]:
+            result["action"] = "single-server-profile"
+            return result
+
+        selected = info["selected"]
+        if selected.get("mode") != "manual":
+            result["action"] = "hiddify-default"
+            return result
+
+        filtered = self._filter_config_to_selected_server(config, selected.get("tag", ""))
+        result["action"] = "manual-server-filter"
+        result["filter"] = filtered
+        result["success"] = filtered.get("success", False)
+        if not result["success"]:
+            result["error"] = filtered.get("error", "Failed to apply selected server")
+        return result
+
+    @staticmethod
     def _unique_tag(base: str, used_tags: set[str]) -> str:
         candidate = base
         index = 2
@@ -688,21 +1069,35 @@ class Plugin:
 
         temp_output_path = f"{CONFIG_PATH}.rebuilt.tmp"
         result["temp_output_path"] = temp_output_path
-        try:
-            with open(profile_config_path) as f:
-                profile_data = json.load(f)
-            result["profile_summary"] = self._config_data_summary(profile_data)
-        except Exception as e:
-            error = f"Failed to parse profile config: {e}"
+        settings_result = self._write_hiddify_runtime_settings()
+        result["hiddify_settings"] = settings_result
+        if not settings_result.get("success"):
+            error = f"Failed to write Hiddify settings: {settings_result.get('error', 'unknown error')}"
             decky.logger.error(error)
             result["error"] = error
             return result
 
-        service_config = copy.deepcopy(profile_data)
-        reserved_normalization = self._normalize_reserved_profile_tags(service_config)
-        service_tag_normalization = self._normalize_tag_collisions(service_config)
-        result["reserved_profile_tag_normalization"] = reserved_normalization
-        result["service_tag_normalization"] = service_tag_normalization
+        normalized = self._normalized_profile_config(profile_id)
+        if not normalized.get("success"):
+            error = f"Failed to prepare profile config: {normalized.get('error', 'unknown error')}"
+            decky.logger.error(error)
+            result["error"] = error
+            result["normalized"] = normalized
+            return result
+
+        service_config = normalized["service_config"]
+        result["profile_summary"] = normalized.get("profile_summary", {})
+        result["reserved_profile_tag_normalization"] = normalized.get("reserved_profile_tag_normalization", {})
+        result["service_tag_normalization"] = normalized.get("service_tag_normalization", {})
+
+        selection_result = self._apply_server_selection(profile_id, service_config)
+        result["server_selection"] = selection_result
+        if not selection_result.get("success", False):
+            error = selection_result.get("error", "Failed to apply selected server")
+            decky.logger.error(error)
+            result["error"] = error
+            return result
+
         result["service_input_summary"] = self._config_data_summary(service_config)
 
         service_input_problems = {
@@ -739,6 +1134,7 @@ class Plugin:
             "build",
             "-c", sanitized_input_path,
             "--tun",
+            "-d", HIDDIFY_SETTINGS_PATH,
             "--full-config",
             "-o", temp_output_path,
         ]
@@ -843,6 +1239,8 @@ class Plugin:
         running = self._service_is_active(service) or self._is_grpc_up()
         state, _ = self._get_install_state()
         active = self._get_active_profile()
+        server_info = self._profile_server_info(active["id"]) if active else {}
+        selected_server = server_info.get("selected", {})
         return {
             "connected":      tun_up,
             "running":        running,
@@ -850,12 +1248,88 @@ class Plugin:
             "vpn_ip":         self._get_vpn_ip() if tun_up else "",
             "install_state":  state,
             "active_profile": active["name"] if active else "",
+            "active_server":  selected_server.get("name", "") if server_info.get("selectable") else "",
+            "server_selectable": bool(server_info.get("selectable")),
         }
 
     # ── Plugin API: profiles ────────────────────────────────────────────────────
 
     async def get_profiles(self) -> list:
         return self._read_profiles()
+
+    async def get_profile_servers(self, profile_id: str) -> dict:
+        try:
+            return self._profile_server_info(profile_id)
+        except Exception as e:
+            decky.logger.error(f"get_profile_servers: {e}")
+            return {
+                "profile_id": profile_id,
+                "selectable": False,
+                "servers": [],
+                "selected": {"mode": "none", "tag": "", "name": "", "valid": False},
+                "count": 0,
+                "error": str(e),
+            }
+
+    async def switch_server(self, profile_id: str, mode: str, tag: str = "") -> dict:
+        service = self._service_snapshot()
+        grpc_up = self._is_grpc_up()
+        tun_exists = self._tun_exists()
+        self._debug_event(
+            "switch_server.entry",
+            profile_id=profile_id,
+            mode=mode,
+            tag=tag,
+            tun_up=self._is_tun_up(),
+            tun_exists=tun_exists,
+            grpc_up=grpc_up,
+            service=service,
+        )
+        if self._is_tun_up() or tun_exists or grpc_up or self._service_is_active(service):
+            self._debug_event("switch_server.blocked_running", profile_id=profile_id, mode=mode, tag=tag)
+            return {"success": False, "message": "Stop VPN before switching server"}
+
+        info = self._profile_server_info(profile_id)
+        if info.get("error"):
+            self._debug_event("switch_server.profile_error", profile_id=profile_id, info=info)
+            return {"success": False, "message": "Failed to read profile servers"}
+        if not info.get("selectable"):
+            return {"success": True, "message": "This profile has a single server"}
+
+        state = self._read_server_selection_state()
+        if mode == "auto":
+            state[profile_id] = {"mode": "auto", "tag": ""}
+            message = "Server: Hiddify default"
+        elif mode == "manual":
+            tags = {server["tag"] for server in info.get("servers", [])}
+            if tag not in tags:
+                self._debug_event("switch_server.invalid_tag", profile_id=profile_id, tag=tag, available=sorted(tags))
+                return {"success": False, "message": "Selected server is not available in this profile"}
+            state[profile_id] = {"mode": "manual", "tag": tag}
+            server = next((item for item in info.get("servers", []) if item["tag"] == tag), None)
+            message = f"Server: {server['name'] if server else tag}"
+        else:
+            return {"success": False, "message": "Unknown server mode"}
+
+        write = self._write_server_selection_state(state)
+        if not write.get("success"):
+            self._debug_event("switch_server.write_failed", profile_id=profile_id, write=write)
+            return {"success": False, "message": "Failed to save selected server"}
+
+        rebuild = self._rebuild_config(profile_id)
+        if not rebuild.get("success", False):
+            self._debug_event("switch_server.rebuild_failed", profile_id=profile_id, rebuild=rebuild)
+            return {"success": False, "message": "Failed to rebuild config for selected server"}
+
+        self._debug_event(
+            "switch_server.done",
+            profile_id=profile_id,
+            mode=mode,
+            tag=tag,
+            info=self._profile_server_info(profile_id),
+            rebuild=rebuild,
+        )
+        return {"success": True, "message": message}
 
     async def switch_profile(self, profile_id: str) -> dict:
         service = self._service_snapshot()
@@ -907,6 +1381,9 @@ class Plugin:
         try:
             self._apply_caps()
             self._ensure_tun()
+            settings = self._write_hiddify_runtime_settings()
+            service = self._ensure_user_service()
+            self._debug_event("repair.done", settings=settings, service=service)
             return {"success": True, "message": "Permissions restored"}
         except Exception as e:
             return {"success": False, "message": str(e)}
@@ -1024,6 +1501,8 @@ class Plugin:
             **profile_sync,
             config=self._config_summary(),
         )
+        if profile_sync.get("attempted") and not profile_sync.get("success"):
+            return {"success": False, "message": "Failed to rebuild active profile config. Open Logs for diagnostics."}
 
         self._ensure_tun()
         if not self._check_caps():
@@ -1178,6 +1657,7 @@ class Plugin:
     async def get_logs(self) -> str:
         log_path = os.path.join(decky.DECKY_PLUGIN_LOG_DIR, "hiddify.log")
         try:
+            active = self._get_active_profile()
             snapshot = json.dumps({
                 "plugin_version": PLUGIN_VERSION,
                 "tun_up": self._is_tun_up(),
@@ -1185,6 +1665,10 @@ class Plugin:
                 "vpn_ip": self._get_vpn_ip(),
                 "install_state": self._get_install_state()[0],
                 "config": self._config_summary(),
+                "hiddify_settings_path": HIDDIFY_SETTINGS_PATH,
+                "hiddify_settings_exists": os.path.exists(HIDDIFY_SETTINGS_PATH),
+                "active_profile": active,
+                "server_info": self._profile_server_info(active["id"]) if active else {},
                 "service": self._service_snapshot(),
             }, ensure_ascii=False, indent=2)
             sections = [
@@ -1237,6 +1721,8 @@ class Plugin:
                         "service_active": tun_up or running,
                         "vpn_ip":         self._get_vpn_ip() if tun_up else "",
                         "active_profile": active["name"] if active else "",
+                        "active_server":  self._profile_server_info(active["id"]).get("selected", {}).get("name", "") if active else "",
+                        "server_selectable": bool(self._profile_server_info(active["id"]).get("selectable")) if active else False,
                         "dropped":        bool(prev_connected and not tun_up and not self._user_stopped),
                     })
                     prev_connected = tun_up
@@ -1253,7 +1739,16 @@ class Plugin:
     async def _main(self):
         decky.logger.info(f"Hiddify VPN plugin loaded — uid={os.getuid()}")
         os.makedirs(decky.DECKY_PLUGIN_SETTINGS_DIR, exist_ok=True)
-        self._debug_event("plugin.load", uid=os.getuid(), install_state=self._get_install_state()[0], config=self._config_summary())
+        settings = self._write_hiddify_runtime_settings()
+        service = self._ensure_user_service()
+        self._debug_event(
+            "plugin.load",
+            uid=os.getuid(),
+            install_state=self._get_install_state()[0],
+            config=self._config_summary(),
+            settings=settings,
+            service=service,
+        )
 
         # Re-apply sudoers + polkit on every load (survives SteamOS A/B updates)
         try:

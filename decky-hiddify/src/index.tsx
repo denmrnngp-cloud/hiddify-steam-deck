@@ -54,11 +54,24 @@ const repair           = callable<[], { success: boolean; message: string }>("re
 const getLogs          = callable<[], string>("get_logs");
 const getProfiles      = callable<[], Array<{ id: string; name: string; active: boolean }>>("get_profiles");
 const switchProfile    = callable<[string], { success: boolean; message: string }>("switch_profile");
+const getProfileServers = callable<[string], ServerInfo>("get_profile_servers");
+const switchServer      = callable<[string, string, string], { success: boolean; message: string }>("switch_server");
 
 interface VpnStatus {
   connected: boolean; running: boolean; vpn_ip: string; install_state: string; active_profile: string;
+  active_server?: string; server_selectable?: boolean;
 }
 interface Profile { id: string; name: string; active: boolean; }
+interface ServerEntry { tag: string; name: string; type: string; server?: string; port?: string; }
+interface ServerSelection { mode: string; tag: string; name: string; valid: boolean; }
+interface ServerInfo {
+  profile_id: string;
+  selectable: boolean;
+  servers: ServerEntry[];
+  selected: ServerSelection;
+  count: number;
+  error?: string;
+}
 
 // ── VPN panel ───────────────────────────────────────────────────────────────
 function VpnPanel() {
@@ -68,6 +81,8 @@ function VpnPanel() {
   const [loading, setLoading]     = useState(false);
   const [profiles, setProfiles]   = useState<Profile[]>([]);
   const [switching, setSwitching] = useState(false);
+  const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
+  const [serverSwitching, setServerSwitching] = useState(false);
   const [showLogs, setShowLogs]   = useState(false);
   const [logs, setLogs]           = useState("");
 
@@ -76,7 +91,24 @@ function VpnPanel() {
   };
 
   const fetchProfiles = async () => {
-    try { setProfiles(await getProfiles()); } catch {}
+    try {
+      const loaded = await getProfiles();
+      setProfiles(loaded);
+      const active = loaded.find(p => p.active);
+      if (active) {
+        try { setServerInfo(await getProfileServers(active.id)); } catch { setServerInfo(null); }
+      } else {
+        setServerInfo(null);
+      }
+    } catch {}
+  };
+
+  const fetchServerInfo = async (profileId?: string) => {
+    if (!profileId) {
+      setServerInfo(null);
+      return;
+    }
+    try { setServerInfo(await getProfileServers(profileId)); } catch { setServerInfo(null); }
   };
 
   useEffect(() => {
@@ -128,7 +160,9 @@ function VpnPanel() {
     try {
       const r = await switchProfile(id);
       if (r.success) {
-        await fetchProfiles();
+        const loaded = await getProfiles();
+        setProfiles(loaded);
+        await fetchServerInfo(id);
         await fetchStatus();
         toaster.toast({ title: "Hiddify VPN", body: r.message, duration: 3000 });
       } else {
@@ -141,8 +175,29 @@ function VpnPanel() {
     }
   };
 
+  const handleServerSwitch = async (mode: string, tag: string = "") => {
+    const active = profiles.find(p => p.active);
+    if (!active || loading || status.running || status.connected) return;
+    setServerSwitching(true);
+    try {
+      const r = await switchServer(active.id, mode, tag);
+      if (r.success) {
+        await fetchServerInfo(active.id);
+        await fetchStatus();
+        toaster.toast({ title: "Hiddify VPN", body: r.message, duration: 3000 });
+      } else {
+        toaster.toast({ title: "Server Error", body: r.message, duration: 5000 });
+      }
+    } catch (e: any) {
+      toaster.toast({ title: "Error", body: String(e), duration: 5000 });
+    } finally {
+      setServerSwitching(false);
+    }
+  };
+
   const isOn = status.connected;
-  const isBusy = loading || status.running;
+  const isBusy = loading || status.running || status.connected;
+  const activeProfile = profiles.find(p => p.active);
 
   // Status dot color
   const dotColor = status.connected ? "#4ade80" : status.running ? "#facc15" : "#f87171";
@@ -151,6 +206,10 @@ function VpnPanel() {
     : status.connected
     ? (status.vpn_ip ? `Connected · ${status.vpn_ip}` : "Connected")
     : status.running ? "Connecting…" : "Disconnected";
+  const activeLabel = [
+    status.active_profile,
+    status.server_selectable && status.active_server ? status.active_server : "",
+  ].filter(Boolean).join(" · ");
 
   return (
     <div>
@@ -168,9 +227,9 @@ function VpnPanel() {
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 14, fontWeight: "bold", color: dotColor }}>
                   {isOn ? "VPN ON" : "VPN OFF"}
-                  {status.active_profile ? (
+                  {activeLabel ? (
                     <span style={{ fontSize: 11, fontWeight: "normal", opacity: 0.75, marginLeft: 6 }}>
-                      {status.active_profile}
+                      {activeLabel}
                     </span>
                   ) : null}
                 </div>
@@ -207,6 +266,53 @@ function VpnPanel() {
                   </div>
                 </ButtonItem>
               ))}
+            </div>
+          </PanelSectionRow>
+        )}
+
+        {/* Server selector: only shown for profiles with multiple real servers */}
+        {activeProfile && serverInfo?.selectable && (
+          <PanelSectionRow>
+            <div style={{ width: "100%", paddingTop: 6 }}>
+              <div style={{ fontSize: 11, opacity: 0.5, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                {isBusy ? "Stop VPN before changing server" : "Server"}
+              </div>
+
+              <ButtonItem
+                onClick={() => !isBusy && !serverSwitching && serverInfo.selected.mode !== "auto" && handleServerSwitch("auto")}
+                disabled={isBusy || serverSwitching || serverInfo.selected.mode === "auto"}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{
+                    width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+                    background: serverInfo.selected.mode === "auto" ? "#4ade80" : "rgba(255,255,255,0.25)",
+                  }} />
+                  <span style={{ flex: 1 }}>Hiddify default</span>
+                  <span style={{ fontSize: 10, opacity: 0.55 }}>auto</span>
+                </div>
+              </ButtonItem>
+
+              {serverInfo.servers.map(server => {
+                const active = serverInfo.selected.mode === "manual" && serverInfo.selected.tag === server.tag;
+                return (
+                  <ButtonItem
+                    key={server.tag}
+                    onClick={() => !isBusy && !serverSwitching && !active && handleServerSwitch("manual", server.tag)}
+                    disabled={isBusy || serverSwitching || active}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{
+                        width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+                        background: active ? "#4ade80" : "rgba(255,255,255,0.25)",
+                      }} />
+                      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {server.name}
+                      </span>
+                      <span style={{ fontSize: 10, opacity: 0.55, textTransform: "uppercase" }}>{server.type}</span>
+                    </div>
+                  </ButtonItem>
+                );
+              })}
             </div>
           </PanelSectionRow>
         )}
