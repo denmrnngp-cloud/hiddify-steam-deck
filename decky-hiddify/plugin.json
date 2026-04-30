@@ -12,7 +12,7 @@
       "proxy",
       "sing-box"
     ],
-    "description": "Control Hiddify VPN from Game Mode. Toggle VPN on/off, switch profiles, view connection status. Requires Hiddify installed via the installer \u2014 see github.com/denmrnngp-cloud/hiddify-steam-deck",
-    "image": "https://raw.githubusercontent.com/denmrnngp-cloud/decky-hiddify/main/assets/store.png"
+    "description": "Control Hiddify VPN from Game Mode. Toggle VPN on/off, switch profiles, view connection status. Requires Hiddify installed via the installer \u2014 see github.com/denmrnngp-cloud/hiddify-steam-deck-vpn",
+    "image": "https://raw.githubusercontent.com/denmrnngp-cloud/hiddify-steam-deck-vpn/main/assets/project-icon.png"
   }
 }

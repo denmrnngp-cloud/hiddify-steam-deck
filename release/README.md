@@ -31,7 +31,7 @@ Common search terms: **Steam Deck VPN**, **VPN Steam Deck**, **SteamOS VPN**, **
 
 Latest stable build: **v1.3.15.1**
 
-- Release: https://github.com/denmrnngp-cloud/hiddify-steam-deck/releases/tag/v1.3.15.1
+- Release: https://github.com/denmrnngp-cloud/hiddify-steam-deck-vpn/releases/tag/v1.3.15.1
 - Installer: `Hiddify-linux-x64-v1.3.15.1.bin`
 - Decky plugin: `decky-hiddify-v1.3.15.1.zip`
 
@@ -66,7 +66,7 @@ Open **Konsole** and run:
 ```bash
 cd ~/Downloads
 curl -L -o Hiddify-linux-x64-v1.3.15.1.bin \
-  https://github.com/denmrnngp-cloud/hiddify-steam-deck/releases/download/v1.3.15.1/Hiddify-linux-x64-v1.3.15.1.bin
+  https://github.com/denmrnngp-cloud/hiddify-steam-deck-vpn/releases/download/v1.3.15.1/Hiddify-linux-x64-v1.3.15.1.bin
 chmod +x Hiddify-linux-x64-v1.3.15.1.bin
 ```
 
@@ -115,7 +115,7 @@ The `.bin` installer already installs the bundled Decky plugin. Manual plugin in
 ```bash
 cd ~/Downloads
 curl -L -o decky-hiddify-v1.3.15.1.zip \
-  https://github.com/denmrnngp-cloud/hiddify-steam-deck/releases/download/v1.3.15.1/decky-hiddify-v1.3.15.1.zip
+  https://github.com/denmrnngp-cloud/hiddify-steam-deck-vpn/releases/download/v1.3.15.1/decky-hiddify-v1.3.15.1.zip
 sudo rm -rf /home/deck/homebrew/plugins/decky-hiddify
 sudo unzip -o decky-hiddify-v1.3.15.1.zip -d /home/deck/homebrew/plugins/
 sudo systemctl restart plugin_loader

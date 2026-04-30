@@ -32,11 +32,11 @@ This project solves that by combining:
 
 Use the latest release:
 
-https://github.com/denmrnngp-cloud/hiddify-steam-deck/releases/latest
+https://github.com/denmrnngp-cloud/hiddify-steam-deck-vpn/releases/latest
 
 Or follow the main installation guide:
 
-https://github.com/denmrnngp-cloud/hiddify-steam-deck#installation
+https://github.com/denmrnngp-cloud/hiddify-steam-deck-vpn#installation
 
 ## Related Search Terms
 

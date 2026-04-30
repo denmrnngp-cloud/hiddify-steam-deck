@@ -1,6 +1,10 @@
 # VPN for Steam Deck / SteamOS — Hiddify Decky Game Mode Plugin
 
-<img src="https://raw.githubusercontent.com/denmrnngp-cloud/hiddify-steam-deck/main/assets/cover.png" alt="Hiddify VPN for Steam Deck and SteamOS with Decky Loader Game Mode plugin" width="100%"/>
+<p align="center">
+  <img src="https://raw.githubusercontent.com/denmrnngp-cloud/hiddify-steam-deck-vpn/main/assets/project-icon.png" alt="Hiddify Steam Deck VPN project icon" width="128"/>
+</p>
+
+<img src="https://raw.githubusercontent.com/denmrnngp-cloud/hiddify-steam-deck-vpn/main/assets/cover.png" alt="Hiddify VPN for Steam Deck and SteamOS with Decky Loader Game Mode plugin" width="100%"/>
 
 > **Unofficial Steam Deck / SteamOS port of [hiddify/hiddify-app](https://github.com/hiddify/hiddify-app)**
 > Desktop Mode Hiddify client installer + Decky Loader Game Mode VPN plugin.
@@ -35,7 +39,7 @@ More details: [Steam Deck VPN for Game Mode and Desktop Mode](docs/steam-deck-vp
 
 Latest stable build: **v1.3.15.1**
 
-- Release: https://github.com/denmrnngp-cloud/hiddify-steam-deck/releases/tag/v1.3.15.1
+- Release: https://github.com/denmrnngp-cloud/hiddify-steam-deck-vpn/releases/tag/v1.3.15.1
 - Installer: `Hiddify-linux-x64-v1.3.15.1.bin`
 - Decky plugin: `decky-hiddify-v1.3.15.1.zip`
 
@@ -45,21 +49,21 @@ This release adds Game Mode server selection for multi-server VPN profiles, fixe
 
 ### Installer and basic VPN toggle
 
-<a href="https://github.com/denmrnngp-cloud/hiddify-steam-deck/releases/download/v1.2.0/demo.mp4">
-  <img src="https://raw.githubusercontent.com/denmrnngp-cloud/hiddify-steam-deck/main/assets/demo.gif" alt="Demo — Hiddify VPN installer and VPN toggle in Desktop and Game Mode" width="100%"/>
+<a href="https://github.com/denmrnngp-cloud/hiddify-steam-deck-vpn/releases/download/v1.2.0/demo.mp4">
+  <img src="https://raw.githubusercontent.com/denmrnngp-cloud/hiddify-steam-deck-vpn/main/assets/demo.gif" alt="Demo — Hiddify VPN installer and VPN toggle in Desktop and Game Mode" width="100%"/>
 </a>
 
-▶ [Download / watch full demo (mp4)](https://github.com/denmrnngp-cloud/hiddify-steam-deck/releases/download/v1.2.0/demo.mp4)
+▶ [Download / watch full demo (mp4)](https://github.com/denmrnngp-cloud/hiddify-steam-deck-vpn/releases/download/v1.2.0/demo.mp4)
 
 ### Game Mode profiles and server selection
 
-<a href="https://raw.githubusercontent.com/denmrnngp-cloud/hiddify-steam-deck/main/assets/game-mode-profiles-demo.mp4">
-  <img src="https://raw.githubusercontent.com/denmrnngp-cloud/hiddify-steam-deck/main/assets/game-mode-profiles-demo.gif" alt="Demo — Hiddify VPN Decky plugin profile and server selection in Game Mode" width="100%"/>
+<a href="https://raw.githubusercontent.com/denmrnngp-cloud/hiddify-steam-deck-vpn/main/assets/game-mode-profiles-demo.mp4">
+  <img src="https://raw.githubusercontent.com/denmrnngp-cloud/hiddify-steam-deck-vpn/main/assets/game-mode-profiles-demo.gif" alt="Demo — Hiddify VPN Decky plugin profile and server selection in Game Mode" width="100%"/>
 </a>
 
 This demo shows the Decky plugin in Game Mode with both single-server and multi-server profiles. The server selector appears only for profiles where server choice is available.
 
-▶ [Download / watch Game Mode profile and server selection demo (mp4)](https://raw.githubusercontent.com/denmrnngp-cloud/hiddify-steam-deck/main/assets/game-mode-profiles-demo.mp4)
+▶ [Download / watch Game Mode profile and server selection demo (mp4)](https://raw.githubusercontent.com/denmrnngp-cloud/hiddify-steam-deck-vpn/main/assets/game-mode-profiles-demo.mp4)
 
 ---
 
@@ -90,7 +94,7 @@ Open **Konsole** and run:
 ```bash
 cd ~/Downloads
 curl -L -o Hiddify-linux-x64-v1.3.15.1.bin \
-  https://github.com/denmrnngp-cloud/hiddify-steam-deck/releases/download/v1.3.15.1/Hiddify-linux-x64-v1.3.15.1.bin
+  https://github.com/denmrnngp-cloud/hiddify-steam-deck-vpn/releases/download/v1.3.15.1/Hiddify-linux-x64-v1.3.15.1.bin
 chmod +x Hiddify-linux-x64-v1.3.15.1.bin
 ```
 
@@ -139,7 +143,7 @@ The `.bin` installer already installs the bundled Decky plugin. Manual plugin in
 ```bash
 cd ~/Downloads
 curl -L -o decky-hiddify-v1.3.15.1.zip \
-  https://github.com/denmrnngp-cloud/hiddify-steam-deck/releases/download/v1.3.15.1/decky-hiddify-v1.3.15.1.zip
+  https://github.com/denmrnngp-cloud/hiddify-steam-deck-vpn/releases/download/v1.3.15.1/decky-hiddify-v1.3.15.1.zip
 sudo rm -rf /home/deck/homebrew/plugins/decky-hiddify
 sudo unzip -o decky-hiddify-v1.3.15.1.zip -d /home/deck/homebrew/plugins/
 sudo systemctl restart plugin_loader
