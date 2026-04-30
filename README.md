@@ -1,4 +1,4 @@
-# Hiddify for Steam Deck / SteamOS — Decky Game Mode VPN Plugin
+# VPN for Steam Deck / SteamOS — Hiddify Decky Game Mode Plugin
 
 <img src="https://raw.githubusercontent.com/denmrnngp-cloud/hiddify-steam-deck/main/assets/cover.png" alt="Hiddify VPN for Steam Deck and SteamOS with Decky Loader Game Mode plugin" width="100%"/>
 
@@ -14,7 +14,22 @@ Hiddify for Steam Deck gives Steam Deck users a clean way to install and control
 
 The Decky plugin supports VPN on/off, VPN profile switching, and server selection directly in Game Mode when the active Hiddify profile contains multiple selectable servers.
 
-Common search terms: **Hiddify Steam Deck**, **Hiddify SteamOS**, **Hiddify Decky plugin**, **Steam Deck VPN**, **Decky VPN plugin**, **Game Mode VPN**, **sing-box Steam Deck**.
+## Steam Deck VPN For Restricted Internet Access
+
+This project is built for Steam Deck users who need a VPN on SteamOS when internet access is blocked, filtered, or unreliable in their country, ISP, hotel, campus, or public Wi-Fi network.
+
+Use Hiddify Steam Deck VPN when you want:
+
+- A Steam Deck VPN that works in both Desktop Mode and Game Mode
+- A Decky VPN plugin that can connect and disconnect without leaving Game Mode
+- VPN profile switching directly from the Steam Deck quick access menu
+- Server selection in the Decky plugin when a Hiddify profile provides multiple servers
+- sing-box based VLESS, Reality, VMess, Trojan, Shadowsocks, Hysteria2, and TUIC support on SteamOS
+- Internet access on Steam Deck through your existing Hiddify subscription or proxy profile
+
+Common search terms: **Steam Deck VPN**, **VPN Steam Deck**, **SteamOS VPN**, **Decky VPN plugin**, **Game Mode VPN**, **Hiddify Steam Deck**, **Hiddify SteamOS**, **Hiddify Decky plugin**, **sing-box Steam Deck**.
+
+More details: [Steam Deck VPN for Game Mode and Desktop Mode](docs/steam-deck-vpn.md)
 
 ## Latest Release
 
