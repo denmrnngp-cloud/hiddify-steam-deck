@@ -59,6 +59,8 @@ function estimatedTextWidth(value) {
   for (const char of value) {
     if (/\p{Script=Han}/u.test(char)) {
       width += 18;
+    } else if (char === "⭐") {
+      width += 22;
     } else if (char === " ") {
       width += 8;
     } else if (char === "•") {
@@ -157,9 +159,9 @@ const parts = [
   `14-day visits: ${n(views.count)} (${n(views.uniques)} unique)`,
   `14-day clones: ${n(clones.count)} (${n(clones.uniques)} unique)`,
   `stars: ${n(repoInfo.stargazers_count)}`,
-  "Скачал? Поставь звезду",
-  "Downloaded? Star the repo",
-  "下载后请给项目点星",
+  "⭐ Скачал? Поставь звезду ⭐",
+  "⭐ Downloaded? Star the repo ⭐",
+  "⭐ 下载后请给项目点星 ⭐",
   `updated: ${updated}`,
 ];
 
