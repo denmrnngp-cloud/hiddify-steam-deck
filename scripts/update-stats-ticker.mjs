@@ -54,6 +54,22 @@ function xml(value) {
     .replaceAll('"', "&quot;");
 }
 
+function estimatedTextWidth(value) {
+  let width = 0;
+  for (const char of value) {
+    if (/\p{Script=Han}/u.test(char)) {
+      width += 18;
+    } else if (char === " ") {
+      width += 8;
+    } else if (char === "•") {
+      width += 18;
+    } else {
+      width += 11;
+    }
+  }
+  return Math.ceil(width);
+}
+
 function readJson(path, fallback) {
   if (!existsSync(path)) return fallback;
   try {
@@ -148,7 +164,9 @@ const parts = [
 ];
 
 const text = parts.join("   •   ");
-const repeated = `${text}   •   ${text}`;
+const marqueeText = `${text}   •   `;
+const segmentWidth = Math.max(1280, estimatedTextWidth(marqueeText));
+const durationSeconds = Math.max(36, Math.round(segmentWidth / 48));
 
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="56" viewBox="0 0 1280 56" role="img" aria-label="${xml(text)}">
   <defs>
@@ -157,14 +175,18 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="56" vi
       <stop offset="0.5" stop-color="#0f1f33"/>
       <stop offset="1" stop-color="#07111f"/>
     </linearGradient>
+    <clipPath id="tickerClip">
+      <rect width="1280" height="56" rx="14"/>
+    </clipPath>
   </defs>
   <rect width="1280" height="56" rx="14" fill="url(#bg)"/>
   <rect x="1" y="1" width="1278" height="54" rx="13" fill="none" stroke="#35f58a" stroke-opacity="0.28"/>
-  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" font-weight="700" fill="#35f58a">
-    <text y="35" xml:space="preserve">
-      <tspan>${xml(repeated)}</tspan>
-      <animate attributeName="x" from="0" to="-640" dur="22s" repeatCount="indefinite"/>
-    </text>
+  <g clip-path="url(#tickerClip)" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" font-weight="700" fill="#35f58a">
+    <g>
+      <text x="0" y="35" textLength="${segmentWidth}" lengthAdjust="spacing" xml:space="preserve">${xml(marqueeText)}</text>
+      <text x="${segmentWidth}" y="35" textLength="${segmentWidth}" lengthAdjust="spacing" xml:space="preserve">${xml(marqueeText)}</text>
+      <animateTransform attributeName="transform" type="translate" from="0 0" to="-${segmentWidth} 0" dur="${durationSeconds}s" repeatCount="indefinite"/>
+    </g>
   </g>
 </svg>
 `;
