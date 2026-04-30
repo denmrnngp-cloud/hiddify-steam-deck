@@ -182,11 +182,12 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="56" vi
   <rect width="1280" height="56" rx="14" fill="url(#bg)"/>
   <rect x="1" y="1" width="1278" height="54" rx="13" fill="none" stroke="#35f58a" stroke-opacity="0.28"/>
   <g clip-path="url(#tickerClip)" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" font-weight="700" fill="#35f58a">
-    <g>
-      <text x="0" y="35" textLength="${segmentWidth}" lengthAdjust="spacing" xml:space="preserve">${xml(marqueeText)}</text>
-      <text x="${segmentWidth}" y="35" textLength="${segmentWidth}" lengthAdjust="spacing" xml:space="preserve">${xml(marqueeText)}</text>
-      <animateTransform attributeName="transform" type="translate" from="0 0" to="-${segmentWidth} 0" dur="${durationSeconds}s" repeatCount="indefinite"/>
-    </g>
+    <text x="0" y="35" textLength="${segmentWidth}" lengthAdjust="spacing" xml:space="preserve"><tspan>${xml(marqueeText)}</tspan>
+      <animate attributeName="x" from="0" to="-${segmentWidth}" dur="${durationSeconds}s" repeatCount="indefinite"/>
+    </text>
+    <text x="${segmentWidth}" y="35" textLength="${segmentWidth}" lengthAdjust="spacing" xml:space="preserve"><tspan>${xml(marqueeText)}</tspan>
+      <animate attributeName="x" from="${segmentWidth}" to="0" dur="${durationSeconds}s" repeatCount="indefinite"/>
+    </text>
   </g>
 </svg>
 `;
