@@ -1,35 +1,37 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
   <title id="title">Hiddify Steam Deck VPN icon</title>
-  <desc id="desc">Clean Steam Deck inspired circular icon with a Hiddify mark inside.</desc>
-  <defs>
-    <linearGradient id="shell" x1="92" y1="70" x2="420" y2="442" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#182238"/>
-      <stop offset="0.58" stop-color="#0c1423"/>
-      <stop offset="1" stop-color="#060a12"/>
-    </linearGradient>
-    <linearGradient id="steamRing" x1="102" y1="86" x2="410" y2="426" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#f4fbff"/>
-      <stop offset="0.48" stop-color="#8dd4ff"/>
-      <stop offset="1" stop-color="#2c77ff"/>
-    </linearGradient>
-    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="16" stdDeviation="16" flood-color="#000000" flood-opacity="0.30"/>
-    </filter>
-  </defs>
+  <desc id="desc">Steam Deck inspired mark with Hiddify logo inside a circular lens.</desc>
 
-  <circle cx="256" cy="256" r="230" fill="url(#shell)" filter="url(#softShadow)"/>
-  <circle cx="256" cy="256" r="185" fill="none" stroke="url(#steamRing)" stroke-width="30"/>
-  <circle cx="256" cy="256" r="132" fill="#0d1524" stroke="#243756" stroke-width="8"/>
+  <rect width="512" height="512" fill="#ffffff"/>
 
-  <circle cx="382" cy="130" r="48" fill="#0d1524" stroke="url(#steamRing)" stroke-width="16"/>
-  <circle cx="382" cy="130" r="18" fill="#82d2ff"/>
+  <path
+    d="M184 20
+       A236 236 0 0 1 184 492"
+    fill="none"
+    stroke="#000000"
+    stroke-width="22"
+    stroke-linecap="butt"/>
 
-  <circle cx="256" cy="260" r="120" fill="#f7fbff"/>
+  <path
+    d="M184 93
+       A163 163 0 0 1 184 419"
+    fill="none"
+    stroke="#000000"
+    stroke-width="22"
+    stroke-linecap="butt"/>
 
-  <g fill="#130205">
-    <path d="M151 324v-62c0-8 4-15 11-19l43-26c9-5 20 1 20 12v106c0 9-7 16-16 16h-42c-9 0-16-7-16-16v-11Z"/>
-    <path d="M243 335V211c0-8 4-15 11-19l58-35c9-5 20 1 20 12v166c0 9-7 16-16 16h-57c-9 0-16-7-16-16Z"/>
-    <rect x="348" y="226" width="55" height="125" rx="11"/>
-    <path d="M359 165h33c6 0 11 5 11 11v38h-55v-38c0-6 5-11 11-11Z"/>
+  <circle
+    cx="190"
+    cy="255"
+    r="133"
+    fill="#ffffff"
+    stroke="#000000"
+    stroke-width="17"/>
+
+  <g fill="#120104">
+    <path d="M94 302v-41c0-5 3-10 8-12l27-16c6-4 14 1 14 8v66h13c5 0 9 4 9 9v21H111c-9 0-17-8-17-17v-18Z"/>
+    <path d="M174 323v-76c0-5 3-10 8-12l42-25c6-4 14 1 14 8v102c0 9-8 17-17 17h-33c-8 0-14-6-14-14Z"/>
+    <rect x="253" y="240" width="44" height="97" rx="7"/>
+    <path d="M261 180h28c5 0 8 4 8 8v39h-44v-31c0-5 3-10 8-16Z"/>
   </g>
 </svg>
