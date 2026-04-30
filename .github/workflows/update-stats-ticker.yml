@@ -1,0 +1,27 @@
+name: Update stats ticker
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Update ticker SVG
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_STATS_TOKEN || github.token }}
+        run: node scripts/update-stats-ticker.mjs
+
+      - name: Commit changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update stats ticker"
+          file_pattern: assets/stats-ticker.svg assets/stats-history.json

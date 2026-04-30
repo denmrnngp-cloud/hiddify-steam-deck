@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="56" viewBox="0 0 1280 56" role="img" aria-label="7-day downloads: 42   •   14-day visits: 671 (158 unique)   •   14-day clones: 509 (71 unique)   •   stars: 6   •   Скачал? Поставь звезду   •   Downloaded? Star the repo   •   下载后请给项目点星   •   updated: 2026-04-30 UTC 13:12">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#07111f"/>
+      <stop offset="0.5" stop-color="#0f1f33"/>
+      <stop offset="1" stop-color="#07111f"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="56" rx="14" fill="url(#bg)"/>
+  <rect x="1" y="1" width="1278" height="54" rx="13" fill="none" stroke="#35f58a" stroke-opacity="0.28"/>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" font-weight="700" fill="#35f58a">
+    <text y="35" xml:space="preserve">
+      <tspan>7-day downloads: 42   •   14-day visits: 671 (158 unique)   •   14-day clones: 509 (71 unique)   •   stars: 6   •   Скачал? Поставь звезду   •   Downloaded? Star the repo   •   下载后请给项目点星   •   updated: 2026-04-30 UTC 13:12   •   7-day downloads: 42   •   14-day visits: 671 (158 unique)   •   14-day clones: 509 (71 unique)   •   stars: 6   •   Скачал? Поставь звезду   •   Downloaded? Star the repo   •   下载后请给项目点星   •   updated: 2026-04-30 UTC 13:12</tspan>
+      <animate attributeName="x" from="0" to="-640" dur="22s" repeatCount="indefinite"/>
+    </text>
+  </g>
+</svg>
