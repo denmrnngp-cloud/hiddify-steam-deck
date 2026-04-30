@@ -61,6 +61,8 @@ function estimatedTextWidth(value) {
       width += 18;
     } else if (char === "⭐") {
       width += 22;
+    } else if (char === "★") {
+      width += 14;
     } else if (char === " ") {
       width += 8;
     } else if (char === "•") {
@@ -155,13 +157,13 @@ if (baseline) {
 
 const updated = now.toISOString().slice(0, 16).replace("T", " UTC ");
 const parts = [
+  "★ ⭐ Downloaded? Star the repo ⭐ ★",
   `7-day downloads: ${n(weeklyDownloads)}`,
   `14-day visits: ${n(views.count)} (${n(views.uniques)} unique)`,
   `14-day clones: ${n(clones.count)} (${n(clones.uniques)} unique)`,
-  `stars: ${n(repoInfo.stargazers_count)}`,
-  "⭐ Скачал? Поставь звезду ⭐",
-  "⭐ Downloaded? Star the repo ⭐",
-  "⭐ 下载后请给项目点星 ⭐",
+  `★ stars: ${n(repoInfo.stargazers_count)} ★`,
+  "★ ⭐ Скачал? Поставь звезду ⭐ ★",
+  "★ ⭐ 下载后请给项目点星 ⭐ ★",
   `updated: ${updated}`,
 ];
 
