@@ -1,9 +1,5 @@
 # VPN for Steam Deck / SteamOS — Hiddify Decky Game Mode Plugin
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/denmrnngp-cloud/hiddify-steam-deck-vpn/main/assets/project-icon.png" alt="Hiddify Steam Deck VPN project icon" width="128"/>
-</p>
-
 <img src="https://raw.githubusercontent.com/denmrnngp-cloud/hiddify-steam-deck-vpn/main/assets/cover.png" alt="Hiddify VPN for Steam Deck and SteamOS with Decky Loader Game Mode plugin" width="100%"/>
 
 > **Unofficial Steam Deck / SteamOS port of [hiddify/hiddify-app](https://github.com/hiddify/hiddify-app)**
