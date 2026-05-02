@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="56" viewBox="0 0 1280 56" role="img" aria-label="★ ⭐ Downloaded? Star the repo ⭐ ★   •   7-day downloads: 119   •   14-day visits: 671 (158 unique)   •   14-day clones: 509 (71 unique)   •   ★ stars: 7 ★   •   ★ ⭐ Скачал? Поставь звезду ⭐ ★   •   ★ ⭐ 下载后请给项目点星 ⭐ ★   •   updated: 2026-05-02 UTC 11:10">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="56" viewBox="0 0 1280 56" role="img" aria-label="★ ⭐ Downloaded? Star the repo ⭐ ★   •   7-day downloads: 120   •   14-day visits: 671 (158 unique)   •   14-day clones: 509 (71 unique)   •   ★ stars: 7 ★   •   ★ ⭐ Скачал? Поставь звезду ⭐ ★   •   ★ ⭐ 下载后请给项目点星 ⭐ ★   •   updated: 2026-05-02 UTC 12:02">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="0" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#07111f"/>
@@ -12,10 +12,10 @@
   <rect width="1280" height="56" rx="14" fill="url(#bg)"/>
   <rect x="1" y="1" width="1278" height="54" rx="13" fill="none" stroke="#35f58a" stroke-opacity="0.28"/>
   <g clip-path="url(#tickerClip)" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" font-weight="700" fill="#35f58a">
-    <text x="0" y="35" textLength="2804" lengthAdjust="spacing" xml:space="preserve"><tspan>★ ⭐ Downloaded? Star the repo ⭐ ★   •   7-day downloads: 119   •   14-day visits: 671 (158 unique)   •   14-day clones: 509 (71 unique)   •   ★ stars: 7 ★   •   ★ ⭐ Скачал? Поставь звезду ⭐ ★   •   ★ ⭐ 下载后请给项目点星 ⭐ ★   •   updated: 2026-05-02 UTC 11:10   •   </tspan>
+    <text x="0" y="35" textLength="2804" lengthAdjust="spacing" xml:space="preserve"><tspan>★ ⭐ Downloaded? Star the repo ⭐ ★   •   7-day downloads: 120   •   14-day visits: 671 (158 unique)   •   14-day clones: 509 (71 unique)   •   ★ stars: 7 ★   •   ★ ⭐ Скачал? Поставь звезду ⭐ ★   •   ★ ⭐ 下载后请给项目点星 ⭐ ★   •   updated: 2026-05-02 UTC 12:02   •   </tspan>
       <animate attributeName="x" from="0" to="-2804" dur="58s" repeatCount="indefinite"/>
     </text>
-    <text x="2804" y="35" textLength="2804" lengthAdjust="spacing" xml:space="preserve"><tspan>★ ⭐ Downloaded? Star the repo ⭐ ★   •   7-day downloads: 119   •   14-day visits: 671 (158 unique)   •   14-day clones: 509 (71 unique)   •   ★ stars: 7 ★   •   ★ ⭐ Скачал? Поставь звезду ⭐ ★   •   ★ ⭐ 下载后请给项目点星 ⭐ ★   •   updated: 2026-05-02 UTC 11:10   •   </tspan>
+    <text x="2804" y="35" textLength="2804" lengthAdjust="spacing" xml:space="preserve"><tspan>★ ⭐ Downloaded? Star the repo ⭐ ★   •   7-day downloads: 120   •   14-day visits: 671 (158 unique)   •   14-day clones: 509 (71 unique)   •   ★ stars: 7 ★   •   ★ ⭐ Скачал? Поставь звезду ⭐ ★   •   ★ ⭐ 下载后请给项目点星 ⭐ ★   •   updated: 2026-05-02 UTC 12:02   •   </tspan>
       <animate attributeName="x" from="2804" to="0" dur="58s" repeatCount="indefinite"/>
     </text>
   </g>
